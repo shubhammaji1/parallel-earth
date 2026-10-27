@@ -1,10 +1,10 @@
 # Your first experiment
 
-Open a trusted local Git repository with at least one commit. Use the globe activity-bar icon or Command Palette.
+Open a trusted local Git repository with at least one commit. Use the Pixel Portal activity-bar icon or Command Palette. The Start here panel has New experiment, Find experiment, Dashboard and Quick guide shortcuts.
 
 **Create Experiment** selects a repository and committed revision. Nested folders resolve to their Git root; multiple repositories prompt for selection. Dirty originals are excluded and preserved. A separate baseline worktree is created.
 
-Expand the experiment, create an Earth, expand it and select **Open Earth**. Edit and save in the new window, then return to the experiment window.
+Expand the current experiment and create an Earth. Click its row or its **Open Earth** icon to open it. Use the play icon to run checks; right-click the Earth for inspection, patching, renaming, duplication, archiving and deletion. Edit and save in the new window, then return to the experiment window.
 
 **Run Checks** lists conventional npm scripts or accepts a relative Node test-file path. A modal displays the exact command, directory, script body when applicable, privileges and machine/network risks. Choose **Approve and Run**. Use Cancel in the progress notification; output is streamed and a bounded copy is retained.
 
@@ -30,6 +30,6 @@ New directories use project--earth-name--short-id, for example nanighar--test-ch
 
 ## Home and history
 
-F5 prepares an explicit empty workspace, opens ParallelEarth home, and creates no demo or experiment. Pick Create Experiment to select your own Git project. Project History groups previously created experiments by repository. Click an experiment to resume it; it appears in Active Experiment without opening its source folder. Open Earth opens only the selected Earth workspace.
+F5 prepares an explicit empty workspace, opens ParallelEarth home, and creates no demo or experiment. Pick Create Experiment to select your own Git project. Project History groups previously created experiments by repository. Click an experiment to resume it; it appears in Current experiment without opening its source folder. Open Earth opens only the selected Earth workspace.
 
-Deletion is available from home cards, experiment context menus or Delete Experiment. Remove from History keeps Earth folders; Delete Clean Worktrees first verifies every worktree is owned, clean and at its source commit. Dirty or otherwise unpreserved work prevents cleanup. The original project is always retained. Failed creation records are hidden from normal history but can be selected in Delete Experiment.
+Deletion is available from home project rows, experiment context menus or Delete Experiment. Remove from History keeps Earth folders; Delete Clean Worktrees first verifies every worktree is owned, clean and at its source commit. Dirty or otherwise unpreserved work prevents cleanup. The original project is always retained. Failed creation records are hidden from normal history but can be selected in Delete Experiment.

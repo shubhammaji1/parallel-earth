@@ -1,3 +1,4 @@
+import { sidebarMarkup, parseSidebarMessage } from './sidebar';
 import * as vscode from 'vscode';
 import path from 'node:path';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
@@ -21,6 +22,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const deleting = new Set<string>();
   let activeExperimentId:string|undefined;
   let homePanel:vscode.WebviewPanel|undefined;
+  let sidebarView:vscode.WebviewView|undefined;
+  let sidebarSnapshot="";
   let homeVersion=0;
   let homeReady=false;
   let homeSnapshot='';
@@ -54,7 +57,23 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       }));
     await renderHome();
   }
-  const refresh = () => {change.fire(undefined);void renderHome().catch(error=>output.appendLine(String(error)));};
+  async function renderSidebar():Promise<void>{
+    const view=sidebarView;if(!view)return;
+    const projects=vscode.workspace.isTrusted?projectHistory(await service.store.load()):[];
+    if(sidebarView!==view)return;
+    const summaries=projectSummaries(projects);
+    const state={trusted:vscode.workspace.isTrusted,projectCount:projects.length,
+      experimentCount:summaries.reduce((n,p)=>n+p.experimentCount,0),earthCount:summaries.reduce((n,p)=>n+p.earthCount,0),
+      activeName:projects.flatMap(p=>p.experiments).find(e=>e.id===activeExperimentId)?.name};
+    const snapshot=JSON.stringify(state);if(snapshot===sidebarSnapshot)return;sidebarSnapshot=snapshot;
+    const logo=view.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri,'media','icon.png')).toString();
+    view.webview.html=sidebarMarkup(state,logo,view.webview.cspSource,randomUUID());
+  }
+  const refresh = () => {
+    change.fire(undefined);
+    void renderHome().catch(error=>output.appendLine(String(error)));
+    void renderSidebar().catch(error=>output.appendLine(String(error)));
+  };
   async function showExplorer(): Promise<void> {
     refresh();
     await vscode.commands.executeCommand('workbench.view.extension.parallelEarth');
@@ -107,14 +126,15 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   function action(label: string, command: string, parent: Item): Item {
     const item: Item = new vscode.TreeItem(label);
     item.command = {command:'parallelEarth.'+command,title:label,arguments:[parent]};
-    item.iconPath = new vscode.ThemeIcon(command==='runChecks'?'play':'arrow-right');
+    const icons:Record<string,string>={createEarth:'add',compareEarths:'git-compare',exportReport:'export',openDocumentation:'book',showDiagnostics:'info'};
+    item.iconPath = new vscode.ThemeIcon(icons[command]??'arrow-right');
     return item;
   }
   const experimentItem=(exp: Experiment):Item=>{
     const item:Item=new vscode.TreeItem(exp.name,vscode.TreeItemCollapsibleState.Expanded);
     item.id='experiment:'+exp.id;item.experimentId=exp.id;item.contextValue='parallelEarth.experiment';
-    item.description=path.basename(exp.repository)+' | '+exp.baselineCommit.slice(0,8);
-    item.tooltip=exp.repository;item.iconPath=new vscode.ThemeIcon('beaker',new vscode.ThemeColor('charts.purple'));
+    item.description=path.basename(exp.repository)+' | '+exp.earths.filter(e=>!e.baseline).length+' Earths';
+    item.tooltip=exp.repository+'\nBaseline commit: '+exp.baselineCommit;item.iconPath=new vscode.ThemeIcon('beaker',new vscode.ThemeColor('charts.purple'));
     return item;
   };
   const provider: vscode.TreeDataProvider<Item> = {
@@ -131,19 +151,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         if(!parent.earthId)return[
           ...exp.earths.map(earth=>{
             const state=earth.runs.at(-1)?.state??'NOT_RUN';
-            const item:Item=new vscode.TreeItem(earth.name,vscode.TreeItemCollapsibleState.Collapsed);
+            const item:Item=new vscode.TreeItem(earth.name,vscode.TreeItemCollapsibleState.None);
             item.id='earth:'+earth.id;item.experimentId=exp.id;item.earthId=earth.id;
-            item.description=(earth.archived?'ARCHIVED | ':'')+state;
+            const states:Record<string,string>={PASSED:'Checks passed',FAILED:'Checks failed',ERROR:'Check error',CANCELLED:'Cancelled',NOT_RUN:'Not checked'};
+            item.description=(earth.archived?'Archived | ':earth.baseline?'Baseline | ':'')+(running.has(earth.id)?'Running...':states[state]??state);
+            item.contextValue=earth.baseline?'parallelEarth.baseline':'parallelEarth.earth';
+            item.command={command:'parallelEarth.openEarth',title:'Open Earth',arguments:[item]};
             item.tooltip=earth.path+'\n'+(earth.baseline?'Committed baseline':'Alternative Earth');
             const icon=earth.baseline?'git-commit':state==='PASSED'?'pass':state==='FAILED'?'error':state==='ERROR'?'warning':'globe';
             const color=state==='PASSED'?'charts.green':state==='FAILED'?'charts.red':state==='ERROR'?'charts.yellow':'charts.blue';
             item.iconPath=new vscode.ThemeIcon(icon,new vscode.ThemeColor(color));return item;
           }),
           action('Create Earth','createEarth',parent),action('Compare evidence','compareEarths',parent),
-          action('Export report','exportReport',parent),action('Delete experiment','deleteExperiment',parent)
+          action('Export report','exportReport',parent)
         ];
-        return ['Open Earth','Inspect Changes','Run Checks','Apply Patch','Rename Earth','Duplicate Earth','Archive Earth','Delete Earth']
-          .map((label,i)=>action(label,['openEarth','inspectChanges','runChecks','applyPatch','renameEarth','duplicateEarth','archiveEarth','deleteEarth'][i],parent));
+        return [];
       }catch(e){output.appendLine(String(e));return[action('Catalog unavailable - Show Diagnostics','showDiagnostics',{})];}
     }
   };
@@ -164,8 +186,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         return project.experiments.map(exp=>{
           const item:Item=new vscode.TreeItem(exp.name);
           item.id='history-experiment:'+exp.id;item.experimentId=exp.id;item.contextValue='parallelEarth.historyExperiment';
-          item.description=exp.earths.filter(e=>!e.baseline).length+' Earths | '+new Date(exp.created).toLocaleDateString();
-          item.tooltip=exp.repository+'\nBaseline: '+exp.baselineCommit;
+          item.description=exp.earths.filter(e=>!e.baseline).length+' Earths';
+          item.tooltip=exp.repository+'\nCreated: '+new Date(exp.created).toLocaleString()+'\nBaseline: '+exp.baselineCommit;
           item.iconPath=new vscode.ThemeIcon('beaker',new vscode.ThemeColor('charts.purple'));
           item.command={command:'parallelEarth.openExperiment',title:'Resume experiment',arguments:[item]};return item;
         });
@@ -174,6 +196,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
 
+  const launchpad=vscode.window.registerWebviewViewProvider('parallelEarth.launchpad',{
+    resolveWebviewView(view){
+      sidebarView=view;sidebarSnapshot='';
+      view.webview.options={enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]};
+      context.subscriptions.push(view.onDidDispose(()=>{if(sidebarView===view){sidebarView=undefined;sidebarSnapshot='';}}),
+        view.webview.onDidReceiveMessage(value=>{
+          const action=parseSidebarMessage(value);if(!action)return;
+          const command={create:'createExperiment',resume:'openExperiment',home:'showHome',help:'openDocumentation'}[action];
+          void vscode.commands.executeCommand('parallelEarth.'+command);
+        }));
+      void renderSidebar().catch(error=>output.appendLine(String(error)));
+    }
+  });
   const explorerView=vscode.window.createTreeView('parallelEarth.explorer',{treeDataProvider:provider});
   const historyView=vscode.window.createTreeView('parallelEarth.history',{treeDataProvider:historyProvider});
   // Opening the activity-bar container should reveal Home in installed builds too.
@@ -184,7 +219,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       void vscode.window.showErrorMessage('ParallelEarth: Unable to open Home. '+String(error));
     });
   };
-  context.subscriptions.push(output,change,explorerView,historyView,
+  context.subscriptions.push(output,change,launchpad,explorerView,historyView,
     explorerView.onDidChangeVisibility(event=>{if(event.visible)openHomeFromSidebar();}),
     historyView.onDidChangeVisibility(event=>{if(event.visible)openHomeFromSidebar();}),
     vscode.workspace.onDidGrantWorkspaceTrust(refresh),

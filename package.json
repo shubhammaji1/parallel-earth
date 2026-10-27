@@ -2,7 +2,7 @@
   "name": "parallel-earth",
   "displayName": "ParallelEarth",
   "description": "Explore alternate futures. Verify before you change. Local worktree experiments with real check evidence.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "shubhammaji1",
   "license": "MIT",
   "engines": {
@@ -24,7 +24,8 @@
   "icon": "media/icon.png",
   "activationEvents": [
     "onView:parallelEarth.explorer",
-    "onStartupFinished"
+    "onStartupFinished",
+    "onView:parallelEarth.launchpad"
   ],
   "capabilities": {
     "untrustedWorkspaces": {
@@ -57,23 +58,28 @@
       },
       {
         "command": "parallelEarth.createExperiment",
-        "title": "ParallelEarth: Create Experiment"
+        "title": "ParallelEarth: Create Experiment",
+        "icon": "$(add)"
       },
       {
         "command": "parallelEarth.createEarth",
-        "title": "ParallelEarth: Create Earth"
+        "title": "ParallelEarth: Create Earth",
+        "icon": "$(add)"
       },
       {
         "command": "parallelEarth.openEarth",
-        "title": "ParallelEarth: Open Earth"
+        "title": "ParallelEarth: Open Earth",
+        "icon": "$(go-to-file)"
       },
       {
         "command": "parallelEarth.renameEarth",
-        "title": "ParallelEarth: Rename Earth"
+        "title": "ParallelEarth: Rename Earth",
+        "icon": "$(edit)"
       },
       {
         "command": "parallelEarth.duplicateEarth",
-        "title": "ParallelEarth: Duplicate Earth Baseline"
+        "title": "ParallelEarth: Duplicate Earth Baseline",
+        "icon": "$(files)"
       },
       {
         "command": "parallelEarth.applyPatch",
@@ -81,27 +87,33 @@
       },
       {
         "command": "parallelEarth.inspectChanges",
-        "title": "ParallelEarth: Inspect Changes"
+        "title": "ParallelEarth: Inspect Changes",
+        "icon": "$(diff)"
       },
       {
         "command": "parallelEarth.runChecks",
-        "title": "ParallelEarth: Run Checks"
+        "title": "ParallelEarth: Run Checks",
+        "icon": "$(play)"
       },
       {
         "command": "parallelEarth.compareEarths",
-        "title": "ParallelEarth: Compare Earths"
+        "title": "ParallelEarth: Compare Earths",
+        "icon": "$(git-compare)"
       },
       {
         "command": "parallelEarth.exportReport",
-        "title": "ParallelEarth: Export Report"
+        "title": "ParallelEarth: Export Report",
+        "icon": "$(export)"
       },
       {
         "command": "parallelEarth.archiveEarth",
-        "title": "ParallelEarth: Archive Earth"
+        "title": "ParallelEarth: Archive / Unarchive Earth",
+        "icon": "$(archive)"
       },
       {
         "command": "parallelEarth.deleteEarth",
-        "title": "ParallelEarth: Delete Earth"
+        "title": "ParallelEarth: Delete Earth",
+        "icon": "$(trash)"
       },
       {
         "command": "parallelEarth.recover",
@@ -113,7 +125,8 @@
       },
       {
         "command": "parallelEarth.openDocumentation",
-        "title": "ParallelEarth: Open Documentation"
+        "title": "ParallelEarth: Open Documentation",
+        "icon": "$(book)"
       },
       {
         "command": "parallelEarth.refresh",
@@ -123,7 +136,7 @@
       {
         "command": "parallelEarth.openExperiment",
         "title": "ParallelEarth: Open Experiment",
-        "icon": "$(folder-open)"
+        "icon": "$(search)"
       },
       {
         "command": "parallelEarth.deleteExperiment",
@@ -153,23 +166,28 @@
     "views": {
       "parallelEarth": [
         {
+          "id": "parallelEarth.launchpad",
+          "name": "Start here",
+          "type": "webview"
+        },
+        {
           "id": "parallelEarth.explorer",
-          "name": "Active Experiment"
+          "name": "Current experiment"
         },
         {
           "id": "parallelEarth.history",
-          "name": "Project History"
+          "name": "Projects"
         }
       ]
     },
     "viewsWelcome": [
       {
         "view": "parallelEarth.explorer",
-        "contents": "Explore alternate futures.\n\nChoose your own Git project and create an experiment. Nothing is created automatically.\n\n[Create Experiment](command:parallelEarth.createExperiment)\n[Open Home](command:parallelEarth.showHome)\n\nResume previous work from Project History below."
+        "contents": "No experiment selected.\n\n[Find an experiment](command:parallelEarth.openExperiment) or [create your first one](command:parallelEarth.createExperiment)."
       },
       {
         "view": "parallelEarth.history",
-        "contents": "Your projects will appear here after you create an experiment.\n\nEach project keeps its own experiments and Earths."
+        "contents": "Your projects appear here after you create an experiment.\n\nExpand a project to resume its experiments."
       }
     ],
     "menus": {
@@ -180,36 +198,86 @@
           "group": "navigation@0"
         },
         {
-          "command": "parallelEarth.createExperiment",
+          "command": "parallelEarth.createEarth",
           "when": "view == parallelEarth.explorer",
-          "group": "navigation"
+          "group": "navigation@1"
         },
         {
-          "command": "parallelEarth.closeExperiment",
-          "when": "view == parallelEarth.explorer",
-          "group": "navigation"
+          "command": "parallelEarth.openExperiment",
+          "when": "view == parallelEarth.history",
+          "group": "navigation@1"
         },
         {
           "command": "parallelEarth.refresh",
           "when": "view == parallelEarth.history",
-          "group": "navigation"
+          "group": "navigation@2"
+        },
+        {
+          "command": "parallelEarth.closeExperiment",
+          "when": "view == parallelEarth.explorer",
+          "group": "experiment@3"
         }
       ],
       "view/item/context": [
         {
-          "command": "parallelEarth.deleteExperiment",
+          "command": "parallelEarth.createEarth",
           "when": "viewItem == parallelEarth.experiment",
-          "group": "inline"
+          "group": "inline@1"
+        },
+        {
+          "command": "parallelEarth.compareEarths",
+          "when": "viewItem == parallelEarth.experiment",
+          "group": "inline@2"
+        },
+        {
+          "command": "parallelEarth.deleteExperiment",
+          "when": "viewItem == parallelEarth.experiment || viewItem == parallelEarth.historyExperiment",
+          "group": "cleanup@9"
         },
         {
           "command": "parallelEarth.openExperiment",
           "when": "viewItem == parallelEarth.historyExperiment",
-          "group": "inline"
+          "group": "inline@1"
         },
         {
-          "command": "parallelEarth.deleteExperiment",
-          "when": "viewItem == parallelEarth.historyExperiment",
-          "group": "inline"
+          "command": "parallelEarth.openEarth",
+          "when": "viewItem == parallelEarth.earth || viewItem == parallelEarth.baseline",
+          "group": "inline@1"
+        },
+        {
+          "command": "parallelEarth.runChecks",
+          "when": "viewItem == parallelEarth.earth || viewItem == parallelEarth.baseline",
+          "group": "inline@2"
+        },
+        {
+          "command": "parallelEarth.inspectChanges",
+          "when": "viewItem == parallelEarth.earth || viewItem == parallelEarth.baseline",
+          "group": "inspect@1"
+        },
+        {
+          "command": "parallelEarth.applyPatch",
+          "when": "viewItem == parallelEarth.earth",
+          "group": "edit@1"
+        },
+        {
+          "command": "parallelEarth.renameEarth",
+          "when": "viewItem == parallelEarth.earth",
+          "group": "edit@2"
+        },
+        {
+          "command": "parallelEarth.duplicateEarth",
+          "when": "viewItem == parallelEarth.earth",
+          "group": "edit@3"
+        },
+        {
+          "command": "parallelEarth.archiveEarth",
+          "when": "viewItem == parallelEarth.earth",
+          "group": "organise@1"
+        },
+        {
+          "command": "parallelEarth.deleteEarth",
+          "when": "viewItem == parallelEarth.earth",
+          "group": "cleanup@9"
         }
       ]
     },

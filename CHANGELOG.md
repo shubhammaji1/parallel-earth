@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.2
+
+Redesigned the sidebar with a branded Start here panel, New experiment and Find experiment actions, library counts and a quick guide. Earth rows now show readable check states with inline Open/Run actions. Editing and cleanup actions are available from context menus; project history stays grouped by repository.
+
+
 ## 0.1.1
 
 Opening the ParallelEarth sidebar now reveals Home in installed builds, including a restored visible sidebar. Both sidebar views include an Open Home title action. The dashboard is not opened on unrelated editor startup when the sidebar is hidden.
