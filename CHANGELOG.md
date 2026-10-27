@@ -14,3 +14,5 @@ F5 now opens an explicit booking demo folder with separate development profile a
 Replaced demo startup with an explicit empty workspace. Added branded home with real project-history cards, separate active/history views, and confirmed experiment deletion with keep-files or clean-worktree modes. Incomplete creation attempts are excluded from normal history. No projects or experiments are seeded on startup.
 
 History now uses six compact project rows per page, search and sorting. Updates preserve the current search/page. Deletion shows immediate progress, blocks duplicate clicks and reuses repository ownership checks to reduce repeated Git work. History-only removal skips Git cleanup.
+
+Redesigned Home around the Pixel Portal identity with clearer experiment actions, live library totals, compact searchable project rows, a concise workflow guide, responsive layouts, light/high-contrast theme support and reduced-motion animation.

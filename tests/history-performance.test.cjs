@@ -32,7 +32,7 @@ class Element {
  set innerHTML(_){throw Error('Client must not insert HTML from project names');}
 }
 test('actual home script keeps six rendered rows, suppresses duplicate deletes and preserves search on updates',()=>{
- const projects=groups(200),ids=['history-list','history-query','history-sort','history-count','history-page','history-prev','history-next','history-empty','history-no-results','history-status'];
+ const projects=groups(200),ids=['history-list','history-query','history-sort','history-count','history-page','history-prev','history-next','history-empty','history-no-results','history-status','history-footer','total-projects','total-experiments','total-earths'];
  const elements=Object.fromEntries(ids.map(id=>[id,new Element()]));
  elements['history-prev'].dataset.action='previous';elements['history-next'].dataset.action='next';
  const events={},windowEvents={},messages=[];
@@ -43,6 +43,8 @@ test('actual home script keeps six rendered rows, suppresses duplicate deletes a
  let saved;
  vm.runInNewContext(source,{document,window,acquireVsCodeApi:()=>({getState:()=>({}),setState:value=>{saved={...value};},postMessage:value=>messages.push(value)}),setTimeout:fn=>{fn();return 1;},clearTimeout:()=>{}},{timeout:1000});
  assert.equal(elements['history-list'].children.length,6);
+ for(const key of ['total-projects','total-experiments','total-earths'])assert.equal(elements[key].textContent,'200');
+ assert.equal(elements['history-footer'].hidden,false);
  events.click({target:elements['history-next']});assert.equal(saved.page,1);
  const search=elements['history-query'];search.value='Project 199';search.listeners.input();
  assert.equal(elements['history-list'].children.length,1);
@@ -58,6 +60,11 @@ test('actual home script keeps six rendered rows, suppresses duplicate deletes a
  assert.equal(search.value,'Project 199');
  assert.equal(elements['history-list'].children.length,0);
  assert.equal(elements['history-no-results'].hidden,false);
+ assert.equal(elements['total-projects'].textContent,'199');
+ windowEvents.message({data:{type:'history',projects:[]}});
+ assert.equal(elements['history-empty'].hidden,false);
+ assert.equal(elements['history-footer'].hidden,true);
+ for(const key of ['total-projects','total-experiments','total-earths'])assert.equal(elements[key].textContent,'0');
 });
 test('initial history payload cannot terminate its nonce script',()=>{
  const data=groups(1);data[0].name='</script><img src=x onerror=alert(1)>';
