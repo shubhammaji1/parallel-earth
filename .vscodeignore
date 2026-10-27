@@ -9,3 +9,11 @@ artifacts/**
 *.zip
 dist/*.map
 
+
+.bouncer/**
+.claude/**
+.codex/**
+dist/host.js
+tsconfig.json
+write-check.txt
+.gitignore

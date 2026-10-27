@@ -249,5 +249,13 @@
     "@vscode/vsce": {
       "@azure/identity": "4.13.0"
     }
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/shubhammaji1/parallel-earth.git"
+  },
+  "homepage": "https://github.com/shubhammaji1/parallel-earth#readme",
+  "bugs": {
+    "url": "https://github.com/shubhammaji1/parallel-earth/issues"
   }
 }
