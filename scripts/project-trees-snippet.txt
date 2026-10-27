@@ -1,0 +1,63 @@
+  const experimentItem=(exp: Experiment):Item=>{
+    const item:Item=new vscode.TreeItem(exp.name,vscode.TreeItemCollapsibleState.Expanded);
+    item.id='experiment:'+exp.id;item.experimentId=exp.id;item.contextValue='parallelEarth.experiment';
+    item.description=path.basename(exp.repository)+' | '+exp.baselineCommit.slice(0,8);
+    item.tooltip=exp.repository;item.iconPath=new vscode.ThemeIcon('beaker',new vscode.ThemeColor('charts.purple'));
+    return item;
+  };
+  const provider: vscode.TreeDataProvider<Item> = {
+    onDidChangeTreeData:change.event,getTreeItem:item=>item,
+    getChildren:async parent=>{
+      try{
+        if(!vscode.workspace.isTrusted)return[action('Read getting started','openDocumentation',{})];
+        const catalog=await service.store.load();
+        if(!parent){
+          const selected=catalog.experiments.find(exp=>exp.id===activeExperimentId);
+          return selected?[experimentItem(selected)]:[];
+        }
+        const exp=catalog.experiments.find(e=>e.id===parent.experimentId);if(!exp)return[];
+        if(!parent.earthId)return[
+          ...exp.earths.map(earth=>{
+            const state=earth.runs.at(-1)?.state??'NOT_RUN';
+            const item:Item=new vscode.TreeItem(earth.name,vscode.TreeItemCollapsibleState.Collapsed);
+            item.id='earth:'+earth.id;item.experimentId=exp.id;item.earthId=earth.id;
+            item.description=(earth.archived?'ARCHIVED | ':'')+state;
+            item.tooltip=earth.path+'\n'+(earth.baseline?'Committed baseline':'Alternative Earth');
+            const icon=earth.baseline?'git-commit':state==='PASSED'?'pass':state==='FAILED'?'error':state==='ERROR'?'warning':'globe';
+            const color=state==='PASSED'?'charts.green':state==='FAILED'?'charts.red':state==='ERROR'?'charts.yellow':'charts.blue';
+            item.iconPath=new vscode.ThemeIcon(icon,new vscode.ThemeColor(color));return item;
+          }),
+          action('Create Earth','createEarth',parent),action('Compare evidence','compareEarths',parent),
+          action('Export report','exportReport',parent),action('Delete experiment','deleteExperiment',parent)
+        ];
+        return ['Open Earth','Inspect Changes','Run Checks','Apply Patch','Rename Earth','Duplicate Earth','Archive Earth','Delete Earth']
+          .map((label,i)=>action(label,['openEarth','inspectChanges','runChecks','applyPatch','renameEarth','duplicateEarth','archiveEarth','deleteEarth'][i],parent));
+      }catch(e){output.appendLine(String(e));return[action('Catalog unavailable - Show Diagnostics','showDiagnostics',{})];}
+    }
+  };
+  const historyProvider:vscode.TreeDataProvider<Item>={
+    onDidChangeTreeData:change.event,getTreeItem:item=>item,
+    getChildren:async parent=>{
+      try{
+        if(!vscode.workspace.isTrusted)return[];
+        const groups=projectHistory(await service.store.load());
+        if(!parent)return groups.map((project,index)=>{
+          const item:Item=new vscode.TreeItem(project.name,vscode.TreeItemCollapsibleState.Collapsed);
+          item.id='history-project:'+project.repository;item.projectRepository=project.repository;
+          item.description=project.experiments.length+' experiment'+(project.experiments.length===1?'':'s');
+          item.tooltip=project.repository;
+          item.iconPath=new vscode.ThemeIcon('repo',new vscode.ThemeColor(['charts.blue','charts.purple','charts.green','charts.orange'][index%4]));return item;
+        });
+        const project=groups.find(p=>p.repository===parent.projectRepository);if(!project)return[];
+        return project.experiments.map(exp=>{
+          const item:Item=new vscode.TreeItem(exp.name);
+          item.id='history-experiment:'+exp.id;item.experimentId=exp.id;item.contextValue='parallelEarth.historyExperiment';
+          item.description=exp.earths.filter(e=>!e.baseline).length+' Earths | '+new Date(exp.created).toLocaleDateString();
+          item.tooltip=exp.repository+'\nBaseline: '+exp.baselineCommit;
+          item.iconPath=new vscode.ThemeIcon('beaker',new vscode.ThemeColor('charts.purple'));
+          item.command={command:'parallelEarth.openExperiment',title:'Resume experiment',arguments:[item]};return item;
+        });
+      }catch(e){output.appendLine(String(e));return[action('History unavailable - Show Diagnostics','showDiagnostics',{})];}
+    }
+  };
+

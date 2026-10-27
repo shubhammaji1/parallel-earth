@@ -1,0 +1,23 @@
+    async openExperiment(item) {
+      trusted();const selected=await experiment(item);if(!selected)return;
+      activeExperimentId=selected.id;await showExplorer();
+    },
+    async closeExperiment() {activeExperimentId=undefined;await showExplorer();},
+    async showHistory() {await vscode.commands.executeCommand('workbench.view.extension.parallelEarth');await vscode.commands.executeCommand('parallelEarth.history.focus');},
+    async deleteExperiment(item) {
+      trusted();
+      const all=(await service.store.load()).experiments;
+      let selected=item?.experimentId?all.find(e=>e.id===item.experimentId):undefined;
+      if(!selected){
+        const pick=await vscode.window.showQuickPick(all.map(e=>({label:e.name,description:path.basename(e.repository)+(e.earths.some(earth=>earth.baseline)?'':' | incomplete'),detail:e.repository,id:e.id})),{placeHolder:'Select an experiment to delete'});
+        selected=all.find(e=>e.id===pick?.id);
+      }
+      if(!selected)return;
+      if(selected.earths.some(e=>running.has(e.id)))throw new Error('Wait until this experiment finishes running.');
+      const choice=await vscode.window.showWarningMessage('Delete "'+selected.name+'" for '+path.basename(selected.repository)+'?\nRemove from History keeps every Earth file. Delete Clean Worktrees also removes its worktrees, and refuses any edits, ignored/untracked files or new commits. Your original project is kept.',{modal:true},'Remove from History','Delete Clean Worktrees');
+      if(choice!=='Remove from History'&&choice!=='Delete Clean Worktrees')return;
+      await service.deleteExperiment(selected.id,true,choice==='Remove from History');
+      if(activeExperimentId===selected.id)activeExperimentId=undefined;
+      await vscode.window.showInformationMessage(choice==='Remove from History'?'Experiment removed from history; Earth files retained.':'Experiment and clean worktrees deleted.');
+    },
+

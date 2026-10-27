@@ -1,0 +1,11 @@
+src/**
+tests/**
+scripts/**
+examples/**
+node_modules/**
+.vscode/**
+.github/**
+artifacts/**
+*.zip
+dist/*.map
+

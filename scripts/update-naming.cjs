@@ -1,0 +1,20 @@
+const fs=require('node:fs');
+let s=fs.readFileSync('src/git.ts','utf8');
+s=s.replace("const exec = promisify(execFile);","import { isEarthPath } from './workspace';\nconst exec = promisify(execFile);");
+s=s.replace('id: string, commit: string): Promise<string>','id: string, commit: string, directory = id): Promise<string>');
+s=s.replace("const target = path.join(root, 'earths', id);","const target = path.join(root, 'earths', directory);\n  if (!isEarthPath(root,id,target)) throw new Error('Ownership path mismatch');");
+s=s.replace("if (path.resolve(target) !== path.resolve(root,'earths',id)) throw new Error('Ownership path mismatch');","if (!isEarthPath(root,id,target)) throw new Error('Ownership path mismatch');");
+fs.writeFileSync('src/git.ts',s);
+s=fs.readFileSync('src/service.ts','utf8');
+s=s.replace("export class Service {","import { earthDirectory } from './workspace';\nexport class Service {");
+s=s.replace("const id = randomUUID(), target = path.join(this.store.root,'earths',id);","const id = randomUUID();\n      const directory=earthDirectory(exp.repository,name(label),id);\n      const target = path.join(this.store.root,'earths',directory);");
+s=s.replace("await createWorktree(exp.repository,this.store.root,id,exp.baselineCommit);","await createWorktree(exp.repository,this.store.root,id,exp.baselineCommit,directory);");
+fs.writeFileSync('src/service.ts',s);
+s=fs.readFileSync('src/extension.ts','utf8');
+s=s.replace("interface Item extends", "import { earthWorkspace } from './workspace';\n\ninterface Item extends");
+s=s.replace("trusted();const selected=await earth(item);if(!selected)return;await service.owned(selected);\n      await vscode.commands.executeCommand('vscode.openFolder',vscode.Uri.file(selected.path),{forceNewWindow:true});","trusted();const selected=await earth(item);if(!selected)return;\n      const exp=await service.owned(selected);\n      const workspace=await earthWorkspace(root,exp.repository,selected);\n      await vscode.commands.executeCommand('vscode.openFolder',vscode.Uri.file(workspace),{forceNewWindow:true});");
+fs.writeFileSync('src/extension.ts',s);
+fs.appendFileSync('src/index.ts',"\nexport * from './workspace';\n");
+fs.appendFileSync('CHANGELOG.md','\nEarths now use readable project/Earth directory prefixes; Open Earth uses a named workspace and Earth window title. Existing UUID worktrees remain supported in place. Colourful ParallelEarth branding added.\n');
+fs.appendFileSync('docs/getting-started.md','\n## Readable Earth names\n\nNew directories use project--earth-name--short-id, for example nanighar--test-change--a1b2c3d4. Open Earth launches a named workspace showing nanighar - Earth: test-change with a ParallelEarth window title. Existing UUID directories stay in place and receive readable display labels when reopened. Rename Earth updates the display name on next open; the creation-time directory stays stable to avoid breaking terminals and processes. Workspace descriptions are generated outside your project. No .vscode files are written into the original or Earth repository.\n');
+

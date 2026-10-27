@@ -1,0 +1,9 @@
+node_modules/
+dist/
+artifacts/
+.vscode-test/
+coverage/
+*.vsix
+
+.bouncer/
+.claude/settings.local.json

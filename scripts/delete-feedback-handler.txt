@@ -1,0 +1,38 @@
+    async deleteExperiment(item) {
+      trusted();
+      const all=(await service.store.load()).experiments;
+      let selected=item?.experimentId?all.find(e=>e.id===item.experimentId):undefined;
+      if(!selected){
+        const pick=await vscode.window.showQuickPick(all.map(e=>({label:e.name,description:path.basename(e.repository)+(e.earths.some(earth=>earth.baseline)?'':' | incomplete'),detail:e.repository,id:e.id})),{placeHolder:'Select an experiment to delete'});
+        selected=all.find(e=>e.id===pick?.id);
+      }
+      if(!selected)return;
+      const target=selected;
+      if(deleting.has(target.id))return;
+      if(target.earths.some(e=>running.has(e.id)))throw new Error('Wait until this experiment finishes running.');
+      deleting.add(target.id);
+      const feedback=(message:string,busy=true)=>{void homePanel?.webview.postMessage({type:'deletion',experimentId:target.id,busy,message});};
+      let result='Deletion cancelled.';
+      feedback('Waiting for confirmation...');
+      try {
+        const choice=await vscode.window.showWarningMessage('Delete "'+target.name+'" for '+path.basename(target.repository)+'?\nRemove from History keeps every Earth file. Delete Clean Worktrees also removes its worktrees, refusing edits, ignored/untracked files or new commits. Your original project is kept.',{modal:true},'Remove from History','Delete Clean Worktrees');
+        if(choice!=='Remove from History'&&choice!=='Delete Clean Worktrees')return;
+        feedback('Deleting experiment...');
+        await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Deleting '+target.name,cancellable:false},
+          async progress=>service.deleteExperiment(target.id,true,choice==='Remove from History',message=>{
+            progress.report({message});feedback(message);
+          }));
+        if(activeExperimentId===target.id)activeExperimentId=undefined;
+        // Refresh the list before displaying the completion toast.
+        refresh();
+        await renderHome();
+        result=choice==='Remove from History'?'Experiment removed from history; Earth files retained.':'Experiment and clean worktrees deleted.';
+        void vscode.window.showInformationMessage(result);
+      } catch(error) {
+        result='Deletion stopped: '+(error instanceof Error?error.message:String(error)).slice(0,240);
+        throw error;
+      } finally {
+        deleting.delete(target.id);feedback(result,false);
+      }
+    },
+

@@ -1,0 +1,248 @@
+{
+  "name": "parallel-earth",
+  "displayName": "ParallelEarth",
+  "description": "Explore alternate futures. Verify before you change. Local worktree experiments with real check evidence.",
+  "version": "0.1.0",
+  "publisher": "shubhammaji1",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.100.0",
+    "node": ">=22.17"
+  },
+  "categories": [
+    "Testing",
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "worktree",
+    "experiments",
+    "testing",
+    "comparison"
+  ],
+  "main": "./dist/extension.js",
+  "icon": "media/icon.png",
+  "activationEvents": [
+    "onView:parallelEarth.explorer",
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Documentation only; Git, patches and checks require Workspace Trust."
+    },
+    "virtualWorkspaces": false
+  },
+  "scripts": {
+    "build": "node scripts/build.cjs",
+    "typecheck": "tsc --noEmit",
+    "test": "node scripts/test.cjs",
+    "test:host": "node scripts/host-test.cjs",
+    "demo": "node scripts/demo.cjs",
+    "package": "node scripts/package.cjs",
+    "vscode:prepublish": "npm run build",
+    "dev:prepare": "node scripts/prepare-dev.cjs"
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "parallelEarth.showHome",
+        "title": "ParallelEarth: Open Home",
+        "icon": "$(home)"
+      },
+      {
+        "command": "parallelEarth.showExplorer",
+        "title": "ParallelEarth: Show Earth Explorer",
+        "icon": "$(globe)"
+      },
+      {
+        "command": "parallelEarth.createExperiment",
+        "title": "ParallelEarth: Create Experiment"
+      },
+      {
+        "command": "parallelEarth.createEarth",
+        "title": "ParallelEarth: Create Earth"
+      },
+      {
+        "command": "parallelEarth.openEarth",
+        "title": "ParallelEarth: Open Earth"
+      },
+      {
+        "command": "parallelEarth.renameEarth",
+        "title": "ParallelEarth: Rename Earth"
+      },
+      {
+        "command": "parallelEarth.duplicateEarth",
+        "title": "ParallelEarth: Duplicate Earth Baseline"
+      },
+      {
+        "command": "parallelEarth.applyPatch",
+        "title": "ParallelEarth: Apply Patch"
+      },
+      {
+        "command": "parallelEarth.inspectChanges",
+        "title": "ParallelEarth: Inspect Changes"
+      },
+      {
+        "command": "parallelEarth.runChecks",
+        "title": "ParallelEarth: Run Checks"
+      },
+      {
+        "command": "parallelEarth.compareEarths",
+        "title": "ParallelEarth: Compare Earths"
+      },
+      {
+        "command": "parallelEarth.exportReport",
+        "title": "ParallelEarth: Export Report"
+      },
+      {
+        "command": "parallelEarth.archiveEarth",
+        "title": "ParallelEarth: Archive Earth"
+      },
+      {
+        "command": "parallelEarth.deleteEarth",
+        "title": "ParallelEarth: Delete Earth"
+      },
+      {
+        "command": "parallelEarth.recover",
+        "title": "ParallelEarth: Recover Experiments"
+      },
+      {
+        "command": "parallelEarth.showDiagnostics",
+        "title": "ParallelEarth: Show Diagnostics"
+      },
+      {
+        "command": "parallelEarth.openDocumentation",
+        "title": "ParallelEarth: Open Documentation"
+      },
+      {
+        "command": "parallelEarth.refresh",
+        "title": "ParallelEarth: Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "parallelEarth.openExperiment",
+        "title": "ParallelEarth: Open Experiment",
+        "icon": "$(folder-open)"
+      },
+      {
+        "command": "parallelEarth.deleteExperiment",
+        "title": "ParallelEarth: Delete Experiment",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "parallelEarth.closeExperiment",
+        "title": "ParallelEarth: Close Active Experiment",
+        "icon": "$(close)"
+      },
+      {
+        "command": "parallelEarth.showHistory",
+        "title": "ParallelEarth: Show Project History",
+        "icon": "$(history)"
+      }
+    ],
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "parallelEarth",
+          "title": "ParallelEarth",
+          "icon": "media/orbit.svg"
+        }
+      ]
+    },
+    "views": {
+      "parallelEarth": [
+        {
+          "id": "parallelEarth.explorer",
+          "name": "Active Experiment"
+        },
+        {
+          "id": "parallelEarth.history",
+          "name": "Project History"
+        }
+      ]
+    },
+    "viewsWelcome": [
+      {
+        "view": "parallelEarth.explorer",
+        "contents": "Explore alternate futures.\n\nChoose your own Git project and create an experiment. Nothing is created automatically.\n\n[Create Experiment](command:parallelEarth.createExperiment)\n[Open Home](command:parallelEarth.showHome)\n\nResume previous work from Project History below."
+      },
+      {
+        "view": "parallelEarth.history",
+        "contents": "Your projects will appear here after you create an experiment.\n\nEach project keeps its own experiments and Earths."
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "parallelEarth.createExperiment",
+          "when": "view == parallelEarth.explorer",
+          "group": "navigation"
+        },
+        {
+          "command": "parallelEarth.closeExperiment",
+          "when": "view == parallelEarth.explorer",
+          "group": "navigation"
+        },
+        {
+          "command": "parallelEarth.refresh",
+          "when": "view == parallelEarth.history",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "parallelEarth.deleteExperiment",
+          "when": "viewItem == parallelEarth.experiment",
+          "group": "inline"
+        },
+        {
+          "command": "parallelEarth.openExperiment",
+          "when": "viewItem == parallelEarth.historyExperiment",
+          "group": "inline"
+        },
+        {
+          "command": "parallelEarth.deleteExperiment",
+          "when": "viewItem == parallelEarth.historyExperiment",
+          "group": "inline"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "ParallelEarth",
+      "properties": {
+        "parallelEarth.storageRoot": {
+          "type": "string",
+          "default": "",
+          "scope": "machine",
+          "description": "Absolute storage path outside repositories. Empty uses extension storage. Changing this switches catalogs."
+        },
+        "parallelEarth.timeoutSeconds": {
+          "type": "integer",
+          "default": 120,
+          "minimum": 1,
+          "maximum": 3600
+        },
+        "parallelEarth.maxConcurrentRuns": {
+          "type": "integer",
+          "default": 1,
+          "minimum": 1,
+          "maximum": 4
+        },
+        "parallelEarth.maxLogBytes": {
+          "type": "integer",
+          "default": 262144,
+          "minimum": 4096,
+          "maximum": 1048576
+        }
+      }
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/vscode": "1.100.0",
+    "@vscode/test-electron": "^2.5.0",
+    "@vscode/vsce": "^3.0.0",
+    "typescript": "^5.9.0"
+  }
+}

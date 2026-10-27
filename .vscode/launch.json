@@ -1,0 +1,20 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "ParallelEarth - Start Empty",
+      "type": "extensionHost",
+      "request": "launch",
+      "args": [
+        "--new-window",
+        "--extensionDevelopmentPath=${workspaceFolder}",
+        "--disable-extensions",
+        "${workspaceFolder}/artifacts/ParallelEarth.code-workspace"
+      ],
+      "outFiles": [
+        "${workspaceFolder}/dist/**/*.js"
+      ],
+      "preLaunchTask": "npm: dev:prepare"
+    }
+  ]
+}

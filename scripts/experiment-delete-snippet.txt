@@ -1,0 +1,35 @@
+  async deleteExperiment(experimentId: string, confirmed: boolean, keepWorktrees = true): Promise<void> {
+    if (!confirmed) throw new Error('Explicit experiment deletion confirmation required');
+    const catalog=await this.store.load(), exp=catalog.experiments.find(e=>e.id===experimentId);
+    if (!exp) throw new Error('Experiment missing');
+    if (keepWorktrees) {
+      await this.store.transaction(async current=>{current.experiments=current.experiments.filter(e=>e.id!==experimentId);});
+      return;
+    }
+    const clean=async(earth: Earth):Promise<void>=>{
+      await assertOwned(exp.repository,this.store.root,earth.id,earth.path);
+      if((await git(earth.path,['status','--porcelain','--untracked-files=all','--ignored'])).trim())
+        throw new Error(earth.name+' has changed, untracked or ignored files. Use Remove from History to keep its files.');
+      if((await git(earth.path,['rev-parse','HEAD'])).trim()!==earth.sourceCommit)
+        throw new Error(earth.name+' has commits that need preservation. Use Remove from History to keep its files.');
+    };
+    // Preflight every Earth before removing anything. Recheck immediately before each removal.
+    for(const earth of exp.earths) await clean(earth);
+    for(const earth of exp.earths) {
+      await this.store.transaction(async current=>{
+        const record=current.experiments.find(e=>e.id===experimentId);
+        const owned=record?.earths.find(e=>e.id===earth.id);
+        if(!record||!owned)throw new Error('Experiment changed during deletion');
+        await clean(owned);
+        await git(exp.repository,['worktree','remove',owned.path]);
+        record.earths=record.earths.filter(e=>e.id!==owned.id);
+        await unlink(path.join(this.store.root,'manifests',owned.id+'.json')).catch(()=>{});
+      });
+    }
+    await this.store.transaction(async current=>{
+      const record=current.experiments.find(e=>e.id===experimentId);
+      if(record?.earths.length)throw new Error('Experiment acquired another Earth; deletion stopped');
+      current.experiments=current.experiments.filter(e=>e.id!==experimentId);
+    });
+  }
+

@@ -1,0 +1,30 @@
+export interface OwnershipContext { repository:string; common:string; registered:ReadonlySet<string> }
+function normalizedPath(value:string):string {
+  const resolved=path.resolve(value);return process.platform==='win32'?resolved.toLowerCase():resolved;
+}
+export async function ownershipContext(repo:string):Promise<OwnershipContext> {
+  const [listed,common]=await Promise.all([
+    git(repo,['worktree','list','--porcelain','-z']),
+    git(repo,['rev-parse','--path-format=absolute','--git-common-dir'])
+  ]);
+  return {repository:normalizedPath(repo),common:await realpath(common.trim()),
+    registered:new Set(listed.split('\0').filter(line=>line.startsWith('worktree ')).map(line=>normalizedPath(line.slice(9))))};
+}
+export async function assertOwned(repo:string,root:string,id:string,target:string,snapshot?:OwnershipContext):Promise<void> {
+  if(!isEarthPath(root,id,target))throw new Error('Ownership path mismatch');
+  await noSymlinks(target);
+  const context=snapshot??await ownershipContext(repo);
+  if(context.repository!==normalizedPath(repo)||!context.registered.has(normalizedPath(target)))throw new Error('Worktree is not registered with its repository');
+  const marker=path.join(target,'.git');await noSymlinks(marker);
+  const pointer=(await readFile(marker,'utf8')).trim();
+  if(!pointer.startsWith('gitdir: ')||pointer.includes('\0')||/[\r\n]/.test(pointer))throw new Error('Invalid linked worktree marker');
+  const admin=path.resolve(target,pointer.slice(8));await noSymlinks(admin);
+  const metadata=await realpath(admin);
+  if(normalizedPath(path.dirname(metadata))!==normalizedPath(path.join(context.common,'worktrees')))throw new Error('Repository identity mismatch');
+  const commonFile=path.join(metadata,'commondir'),backlinkFile=path.join(metadata,'gitdir');
+  await noSymlinks(commonFile);await noSymlinks(backlinkFile);
+  const [common,backlink]=await Promise.all([readFile(commonFile,'utf8'),readFile(backlinkFile,'utf8')]);
+  if(normalizedPath(await realpath(path.resolve(metadata,common.trim())))!==normalizedPath(context.common))throw new Error('Repository identity mismatch');
+  if(normalizedPath(await realpath(path.resolve(metadata,backlink.trim())))!==normalizedPath(await realpath(marker)))throw new Error('Worktree backlink mismatch');
+}
+

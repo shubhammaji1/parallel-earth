@@ -1,0 +1,53 @@
+const vscode=acquireVsCodeApi();
+let projects=INITIAL_PROJECTS;
+const getPage=PAGE_FUNCTION;
+const saved=vscode.getState()||{};
+const state={query:typeof saved.query==='string'?saved.query.slice(0,200):'',page:Number.isInteger(saved.page)?saved.page:0,sort:saved.sort==='name'?'name':'recent'};
+const pending=new Set();
+const list=document.getElementById('history-list'),query=document.getElementById('history-query'),sort=document.getElementById('history-sort');
+query.value=state.query;sort.value=state.sort;
+function element(tag,className,text){const node=document.createElement(tag);if(className)node.className=className;if(text!==undefined)node.textContent=text;return node;}
+function button(label,action,id,subtle){const node=element('button',subtle?'subtle':'',label);node.dataset.action=action;if(id)node.dataset.id=id;return node;}
+function render(){
+ const page=getPage(projects,state.query,state.page,6,state.sort);state.page=page.page;vscode.setState(state);
+ const rows=page.rows.map(project=>{
+  const row=element('article','project-row');
+  const mark=element('span','project-icon','◈');mark.setAttribute('aria-hidden','true');
+  const details=element('div','project-details');
+  details.append(element('h3','',project.name));
+  const location=element('p','path',project.repository);location.title=project.repository;details.append(location);
+  details.append(element('p','recent',project.experimentCount+' experiments · '+project.earthCount+' Earths · Latest: '+project.latestName));
+  const actions=element('div','actions');
+  const resume=button('Resume','open',project.latestId,false);
+  const remove=button(pending.has(project.latestId)?'Working…':'Delete','delete',project.latestId,true);
+  remove.setAttribute('aria-label','Delete latest experiment: '+project.latestName);
+  resume.disabled=remove.disabled=pending.has(project.latestId);actions.append(resume,remove);row.append(mark,details,actions);return row;
+ });
+ list.replaceChildren(...rows);
+ document.getElementById('history-count').textContent=page.from+'–'+page.to+' of '+page.total+' projects';
+ document.getElementById('history-page').textContent='Page '+(page.page+1)+' of '+page.pages;
+ document.getElementById('history-prev').disabled=page.page===0;
+ document.getElementById('history-next').disabled=page.page>=page.pages-1;
+ document.getElementById('history-empty').hidden=projects.length>0;
+ document.getElementById('history-no-results').hidden=projects.length===0||page.total>0;
+}
+let timer;
+query.addEventListener('input',()=>{clearTimeout(timer);timer=setTimeout(()=>{state.query=query.value.slice(0,200);state.page=0;render();},150);});
+sort.addEventListener('change',()=>{state.sort=sort.value;state.page=0;render();});
+document.addEventListener('click',event=>{
+ const control=event.target.closest('button[data-action]');if(!control||control.disabled)return;
+ const action=control.dataset.action,id=control.dataset.id;
+ if(action==='previous'){state.page--;render();return;}
+ if(action==='next'){state.page++;render();return;}
+ if(action==='delete'){if(pending.has(id))return;pending.add(id);document.getElementById('history-status').textContent='Waiting for deletion confirmation…';render();}
+ const message={action};if(id)message.experimentId=id;vscode.postMessage(message);
+});
+window.addEventListener('message',event=>{
+ const message=event.data;if(!message||typeof message!=='object')return;
+ if(message.type==='history'&&Array.isArray(message.projects)){projects=message.projects;render();}
+ if(message.type==='deletion'&&typeof message.experimentId==='string'){
+  if(message.busy)pending.add(message.experimentId);else pending.delete(message.experimentId);
+  document.getElementById('history-status').textContent=typeof message.message==='string'?message.message.slice(0,300):'';render();
+ }
+});
+render();

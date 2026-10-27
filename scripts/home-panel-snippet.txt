@@ -1,0 +1,26 @@
+  let homePanel:vscode.WebviewPanel|undefined;
+  let homeVersion=0;
+  async function renderHome():Promise<void>{
+    const panel=homePanel,version=++homeVersion;if(!panel)return;
+    const projects=vscode.workspace.isTrusted?projectHistory(await service.store.load()):[];
+    if(panel!==homePanel||version!==homeVersion)return;
+    const logo=panel.webview.asWebviewUri(vscode.Uri.joinPath(context.extensionUri,'media','icon.png')).toString();
+    panel.webview.html=homeMarkup(projects,logo,panel.webview.cspSource,randomUUID());
+  }
+  async function showHome():Promise<void>{
+    if(homePanel){homePanel.reveal(vscode.ViewColumn.One);await renderHome();return;}
+    const panel=vscode.window.createWebviewPanel('parallelEarth.home','ParallelEarth',vscode.ViewColumn.One,{
+      enableScripts:true,localResourceRoots:[vscode.Uri.joinPath(context.extensionUri,'media')]
+    });
+    homePanel=panel;
+    panel.iconPath=vscode.Uri.joinPath(context.extensionUri,'media','icon.png');
+    context.subscriptions.push(panel,panel.onDidDispose(()=>{if(homePanel===panel)homePanel=undefined;}),
+      panel.webview.onDidReceiveMessage(async value=>{
+        const message=parseHomeMessage(value);if(!message)return;
+        const command=message.action==='create'?'createExperiment':message.action==='history'?'showHistory':message.action==='open'?'openExperiment':'deleteExperiment';
+        await vscode.commands.executeCommand('parallelEarth.'+command,'experimentId' in message?{experimentId:message.experimentId}:undefined);
+      }));
+    await renderHome();
+  }
+  const refresh = () => {change.fire(undefined);void renderHome().catch(error=>output.appendLine(String(error)));};
+

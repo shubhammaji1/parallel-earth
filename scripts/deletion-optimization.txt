@@ -1,0 +1,47 @@
+  async deleteExperiment(experimentId:string,confirmed:boolean,keepWorktrees=true,onProgress?:(message:string)=>void):Promise<void> {
+    if(!confirmed)throw new Error('Explicit experiment deletion confirmation required');
+    const progress=(message:string)=>{try{onProgress?.(message);}catch{/* A view callback must not interrupt filesystem cleanup. */}};
+    if(keepWorktrees){
+      progress('Removing experiment from history...');
+      await this.store.transaction(async catalog=>{
+        if(!catalog.experiments.some(e=>e.id===experimentId))throw new Error('Experiment missing');
+        catalog.experiments=catalog.experiments.filter(e=>e.id!==experimentId);
+      });
+      progress('Removed from history. Earth files retained.');return;
+    }
+    const exp=(await this.store.load()).experiments.find(e=>e.id===experimentId);
+    if(!exp)throw new Error('Experiment missing');
+    // Share the repository snapshot, but verify every live worktree marker/backlink on both passes.
+    const context=exp.earths.length?await ownershipContext(exp.repository):undefined;
+    const clean=async(earth:Earth):Promise<void>=>{
+      await assertOwned(exp.repository,this.store.root,earth.id,earth.path,context);
+      const status=await git(earth.path,['status','--porcelain=v2','--branch','--untracked-files=all','--ignored']);
+      const lines=status.split(/\r?\n/).filter(Boolean);
+      if(lines.some(line=>!line.startsWith('# ')))throw new Error(earth.name+' has changed, untracked or ignored files. Use Remove from History to keep its files.');
+      const revision=lines.find(line=>line.startsWith('# branch.oid '))?.slice(13);
+      if(revision!==earth.sourceCommit)throw new Error(earth.name+' has commits that need preservation. Use Remove from History to keep its files.');
+    };
+    // Read-only preflight is bounded to two worktrees at a time. Removals remain sequential.
+    for(let index=0;index<exp.earths.length;index+=2){
+      progress('Checking worktrees '+(index+1)+'–'+Math.min(index+2,exp.earths.length)+' of '+exp.earths.length);
+      await Promise.all(exp.earths.slice(index,index+2).map(clean));
+    }
+    for(const [index,earth]of exp.earths.entries()){
+      progress('Removing '+earth.name+' ('+(index+1)+'/'+exp.earths.length+')');
+      await this.store.transaction(async catalog=>{
+        const record=catalog.experiments.find(e=>e.id===experimentId),owned=record?.earths.find(e=>e.id===earth.id);
+        if(!record||!owned)throw new Error('Experiment changed during deletion');
+        await clean(owned);
+        await git(exp.repository,['worktree','remove',owned.path]);
+        record.earths=record.earths.filter(e=>e.id!==owned.id);
+        await unlink(path.join(this.store.root,'manifests',owned.id+'.json')).catch(()=>{});
+      });
+    }
+    await this.store.transaction(async catalog=>{
+      const record=catalog.experiments.find(e=>e.id===experimentId);
+      if(record?.earths.length)throw new Error('Experiment acquired another Earth; deletion stopped');
+      catalog.experiments=catalog.experiments.filter(e=>e.id!==experimentId);
+    });
+    progress('Experiment and clean worktrees removed.');
+  }
+

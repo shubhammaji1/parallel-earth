@@ -1,0 +1,23 @@
+const fs=require('node:fs');
+let s=fs.readFileSync('README.md','utf8');
+s=s.replace('Native views avoid a Webview attack surface.','The branded home Webview uses a restrictive nonce CSP, local asset roots, escaped project data and a validated message allowlist. Native views manage experiments and history.');
+s=s.replace('Select **ParallelEarth: Create Experiment**, name it and select a committed baseline.','Select **ParallelEarth: Create Experiment**, choose your own project, name the experiment and select a committed baseline.');
+s+='\n## Home and project history\n\nF5 opens an empty ParallelEarth workspace and a branded home screen. No demo, repository or experiment is created automatically. Create Experiment chooses your own Git project. Previous projects appear as grouped history cards and in Project History; the Active Experiment view stays empty until you create or resume one. Interrupted creation attempts are omitted from normal history and remain available through Delete Experiment for cleanup.\n\nDelete Experiment offers Remove from History (retains all Earth files) or Delete Clean Worktrees (refuses edits, ignored/untracked files or new commits). Both require explicit confirmation. Your source repository is never deleted. Close Active Experiment returns to the start view without deleting it.\n';
+fs.writeFileSync('README.md',s);
+s=fs.readFileSync('docs/getting-started.md','utf8');
+const at=s.indexOf('## F5 development workspace');
+if(at>=0)s=s.slice(0,at);
+s+='\n## Home and history\n\nF5 prepares an explicit empty workspace, opens ParallelEarth home, and creates no demo or experiment. Pick Create Experiment to select your own Git project. Project History groups previously created experiments by repository. Click an experiment to resume it; it appears in Active Experiment without opening its source folder. Open Earth opens only the selected Earth workspace.\n\nDeletion is available from home cards, experiment context menus or Delete Experiment. Remove from History keeps Earth folders; Delete Clean Worktrees first verifies every worktree is owned, clean and at its source commit. Dirty or otherwise unpreserved work prevents cleanup. The original project is always retained. Failed creation records are hidden from normal history but can be selected in Delete Experiment.\n';
+fs.writeFileSync('docs/getting-started.md',s);
+s=fs.readFileSync('docs/architecture.md','utf8');
+s=s.replace('Native Markdown reports avoid a Webview, scripts, message protocol and CSP exceptions.','Native Markdown reports remain the evidence view. A branded home Webview uses escaped HTML, local resource roots, nonce CSP and an explicit action/ID message protocol; project history and active experiment selection are native TreeViews.');
+s+='\nHome and history are derived from persisted user-created experiments, with incomplete creation attempts excluded from normal history. Active selection is per-window memory and starts empty. F5 targets a generated workspace with an empty folders array, preventing previous-folder restoration without creating sample data. Catalog data is never seeded at activation.\n';
+fs.writeFileSync('docs/architecture.md',s);
+s=fs.readFileSync('docs/security-model.md','utf8').replace('| XSS | No Webview in v0.1 | Review exported Markdown and logs |','| XSS/messages | Home uses HTML escaping, local resources, nonce CSP and action/UUID allowlist | Review exported Markdown and logs |');
+s+='\nExperiment deletion requires a modal confirmation. History-only removal retains every worktree. Filesystem cleanup preflights all Earths and rechecks ownership/clean state before each Git removal, recording progress per Earth. No force removal is used. Home contains no remote resources or arbitrary-command message handler.\n';
+fs.writeFileSync('docs/security-model.md',s);
+fs.appendFileSync('CHANGELOG.md','\nReplaced demo startup with an explicit empty workspace. Added branded home with real project-history cards, separate active/history views, and confirmed experiment deletion with keep-files or clean-worktree modes. Incomplete creation attempts are excluded from normal history. No projects or experiments are seeded on startup.\n');
+let packageScript=fs.readFileSync('scripts/package.cjs','utf8');
+packageScript=packageScript.replace("if(fs.statSync(path.join(dir,file)).isFile())add", "if(file!=='host.js'&&fs.statSync(path.join(dir,file)).isFile())add");
+fs.writeFileSync('scripts/package.cjs',packageScript);
+
