@@ -63,8 +63,13 @@ test('clean deletion preflights every Earth before removing baseline or alternat
   await assert.rejects(()=>fs.access(earth.path));
   assert.equal(await fs.readFile(path.join(f.repo,'file.txt'),'utf8'),'original\n');
 });
-test('empty startup creates no automatic project or experiment',async()=>{
-  const workspace=JSON.parse(await fs.readFile('artifacts/ParallelEarth.code-workspace','utf8'));
+test('empty startup creates no automatic project or experiment',async(t)=>{
+  const {writeEmptyWorkspace}=require('../scripts/dev-workspace.cjs');
+  const directory=await fs.mkdtemp(path.join(require('node:os').tmpdir(),'parallel-earth-startup-'));
+  t.after(()=>fs.rm(directory,{recursive:true,force:true}));
+  const file=await writeEmptyWorkspace(directory);
+  assert.deepEqual(await fs.readdir(directory),['ParallelEarth.code-workspace']);
+  const workspace=JSON.parse(await fs.readFile(file,'utf8'));
   assert.deepEqual(workspace.folders,[]);
   const prep=await fs.readFile('scripts/prepare-dev.cjs','utf8');
   assert.doesNotMatch(prep,/createExperiment|createEarth|git\(|fs\.cp/);
