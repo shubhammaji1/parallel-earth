@@ -174,8 +174,19 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   };
 
 
-  context.subscriptions.push(output,change,vscode.window.registerTreeDataProvider('parallelEarth.explorer',provider),
-    vscode.window.registerTreeDataProvider('parallelEarth.history',historyProvider),
+  const explorerView=vscode.window.createTreeView('parallelEarth.explorer',{treeDataProvider:provider});
+  const historyView=vscode.window.createTreeView('parallelEarth.history',{treeDataProvider:historyProvider});
+  // Opening the activity-bar container should reveal Home in installed builds too.
+  const openHomeFromSidebar=()=>{
+    if(homePanel)return;
+    void showHome().catch(error=>{
+      output.appendLine(String(error));
+      void vscode.window.showErrorMessage('ParallelEarth: Unable to open Home. '+String(error));
+    });
+  };
+  context.subscriptions.push(output,change,explorerView,historyView,
+    explorerView.onDidChangeVisibility(event=>{if(event.visible)openHomeFromSidebar();}),
+    historyView.onDidChangeVisibility(event=>{if(event.visible)openHomeFromSidebar();}),
     vscode.workspace.onDidGrantWorkspaceTrust(refresh),
     {dispose:()=>{for(const controller of controllers)controller.abort();}},
     vscode.workspace.onDidChangeConfiguration(e=>{if(e.affectsConfiguration('parallelEarth.storageRoot')||e.affectsConfiguration('parallelEarth.maxConcurrentRuns'))void vscode.window.showInformationMessage('Reload the VS Code window to apply ParallelEarth storage or concurrency changes.');})
@@ -337,7 +348,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
     async recover() {trusted();await text('# Recovery\n\n'+(await service.recover()).join('\n\n'));},
     async showDiagnostics() {
-      const diagnostics=['ParallelEarth 0.1.0','Workspace trusted: '+vscode.workspace.isTrusted,'Storage: '+root,'Platform: '+process.platform+' '+process.arch,'Extension Node: '+process.version];
+      const diagnostics=['ParallelEarth '+context.extension.packageJSON.version,'Workspace trusted: '+vscode.workspace.isTrusted,'Storage: '+root,'Platform: '+process.platform+' '+process.arch,'Extension Node: '+process.version];
       if(vscode.workspace.isTrusted){try{diagnostics.push((await git(rootExistsFallback(),['--version'])).trim());diagnostics.push('Experiments: '+(await service.store.load()).experiments.length);}catch(e){diagnostics.push(String(e));}}
       await text(diagnostics.join('\n'),'plaintext');
     },
@@ -357,6 +368,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   }));
   if(vscode.workspace.isTrusted)await mkdir(root,{recursive:true});
   if(context.extensionMode===vscode.ExtensionMode.Development){await showExplorer();await showHome();}
+  else if(explorerView.visible||historyView.visible)await showHome();
 }
 export function deactivate():void {}
 

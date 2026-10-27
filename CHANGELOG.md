@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+Opening the ParallelEarth sidebar now reveals Home in installed builds, including a restored visible sidebar. Both sidebar views include an Open Home title action. The dashboard is not opened on unrelated editor startup when the sidebar is hidden.
+
 ## 0.1.0 — Unreleased
 
 Initial local MVP: committed-baseline experiments, detached Earths, native Explorer, approved text patches/checks, historical comparisons, reports, persistence, recovery and conservative cleanup. Includes real booking demo. Marketplace and cross-platform validation pending; see docs/validation.md.

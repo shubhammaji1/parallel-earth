@@ -2,7 +2,7 @@
   "name": "parallel-earth",
   "displayName": "ParallelEarth",
   "description": "Explore alternate futures. Verify before you change. Local worktree experiments with real check evidence.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "shubhammaji1",
   "license": "MIT",
   "engines": {
@@ -174,6 +174,11 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "parallelEarth.showHome",
+          "when": "view == parallelEarth.explorer || view == parallelEarth.history",
+          "group": "navigation@0"
+        },
         {
           "command": "parallelEarth.createExperiment",
           "when": "view == parallelEarth.explorer",
