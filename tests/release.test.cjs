@@ -5,7 +5,9 @@ const {fork}=require('node:child_process');
 const {randomUUID}=require('node:crypto');
 const {ExecutionQueue,compare,checkSeries,markdown,validateCommand,validateCatalog}=require('../dist/index.js');
 const delay=ms=>new Promise(r=>setTimeout(r,ms));
-async function temp(fn){const root=await fs.mkdtemp(path.join(os.tmpdir(),'earth-release-'));try{await fn(root);}finally{await fs.rm(root,{recursive:true,force:true});}}
+async function temp(fn){const root=await fs.realpath(
+  await fs.mkdtemp(path.join(os.tmpdir(),'earth-release-'))
+);try{await fn(root);}finally{await fs.rm(root,{recursive:true,force:true});}}
 test('independent queue instances serialize commands, release errors and cancel waiting work',()=>temp(async root=>{
  const a=new ExecutionQueue(root),b=new ExecutionQueue(root);let release,started;
  const ready=new Promise(r=>started=r),gate=new Promise(r=>release=r);
