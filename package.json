@@ -2,7 +2,7 @@
   "name": "parallel-earth",
   "displayName": "ParallelEarth",
   "description": "Explore alternate futures. Verify before you change. Local worktree experiments with real check evidence.",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "publisher": "shubhammaji1",
   "license": "MIT",
   "engines": {
@@ -152,6 +152,26 @@
         "command": "parallelEarth.showHistory",
         "title": "ParallelEarth: Show Project History",
         "icon": "$(history)"
+      },
+      {
+        "command": "parallelEarth.copyEarthPath",
+        "title": "ParallelEarth: Copy Earth Path",
+        "icon": "$(copy)"
+      },
+      {
+        "command": "parallelEarth.revealEarthFolder",
+        "title": "ParallelEarth: Reveal Earth Folder",
+        "icon": "$(folder-opened)"
+      },
+      {
+        "command": "parallelEarth.setupEarth",
+        "title": "ParallelEarth: Set Up Earth",
+        "icon": "$(tools)"
+      },
+      {
+        "command": "parallelEarth.repeatChecks",
+        "title": "ParallelEarth: Repeat Checks Against Baseline",
+        "icon": "$(run-all)"
       }
     ],
     "viewsContainers": {
@@ -278,6 +298,26 @@
           "command": "parallelEarth.deleteEarth",
           "when": "viewItem == parallelEarth.earth",
           "group": "cleanup@9"
+        },
+        {
+          "command": "parallelEarth.copyEarthPath",
+          "when": "viewItem == parallelEarth.earth || viewItem == parallelEarth.baseline",
+          "group": "evidence@23"
+        },
+        {
+          "command": "parallelEarth.revealEarthFolder",
+          "when": "viewItem == parallelEarth.earth || viewItem == parallelEarth.baseline",
+          "group": "evidence@24"
+        },
+        {
+          "command": "parallelEarth.setupEarth",
+          "when": "viewItem == parallelEarth.earth || viewItem == parallelEarth.baseline",
+          "group": "evidence@25"
+        },
+        {
+          "command": "parallelEarth.repeatChecks",
+          "when": "viewItem == parallelEarth.experiment",
+          "group": "evidence@26"
         }
       ]
     },
@@ -300,7 +340,9 @@
           "type": "integer",
           "default": 1,
           "minimum": 1,
-          "maximum": 4
+          "maximum": 1,
+          "description": "Commands are now serialised across windows sharing storage. Legacy values above one are ignored.",
+          "deprecationMessage": "The shared execution queue always runs one command at a time."
         },
         "parallelEarth.maxLogBytes": {
           "type": "integer",

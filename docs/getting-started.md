@@ -18,7 +18,7 @@ Run identical checks for baseline and alternatives with matching settings. **Com
 
 **Recover Experiments** validates creation manifests and Git registration, recovers journaled worktrees missing from the catalog and reports unavailable paths. It does not delete stale records or silently repair missing Git metadata.
 
-Storage defaults to extension global storage outside the repository. Settings changes to storage/concurrency require window reload. Storage changes switch catalogs. At most 50 runs per Earth are retained, with a configured byte limit per run. Telemetry and AI are absent.
+Storage defaults to extension global storage outside the repository. Settings changes to storage require window reload. Storage changes switch catalogs. At most 50 runs per Earth are retained, with a configured byte limit per run. Telemetry and AI are absent.
 
 For the fixture demo, invoke npm run demo in the extension source repository. Review artifacts/booking-report.md.
 
@@ -33,3 +33,5 @@ New directories use project--earth-name--short-id, for example nanighar--test-ch
 F5 prepares an explicit empty workspace, opens ParallelEarth home, and creates no demo or experiment. Pick Create Experiment to select your own Git project. Project History groups previously created experiments by repository. Click an experiment to resume it; it appears in Current experiment without opening its source folder. Open Earth opens only the selected Earth workspace.
 
 Deletion is available from home project rows, experiment context menus or Delete Experiment. Remove from History keeps Earth folders; Delete Clean Worktrees first verifies every worktree is owned, clean and at its source commit. Dirty or otherwise unpreserved work prevents cleanup. The original project is always retained. Failed creation records are hidden from normal history but can be selected in Delete Experiment.
+
+For setup, directory actions, repeated checks and queue recovery, see the README section “New in 0.2.0”. Commands now run sequentially across windows sharing storage.

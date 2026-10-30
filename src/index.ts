@@ -11,3 +11,5 @@ export * from './workspace';
 export * from './history';
 
 export * from './home';
+
+export * from './queue';

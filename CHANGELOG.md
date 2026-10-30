@@ -1,3 +1,12 @@
+# 0.2.0
+
+- Added Copy Earth Path, Reveal Earth Folder and directory tooltips.
+- Added explicitly approved independent setup with recorded outcomes.
+- Serialised setup and checks across windows sharing local storage, with queue status and cancellation.
+- Added repeated baseline/alternative checks and complete-series instability indicators.
+- Expanded reports with setup, revisions, commands, repeats and queue evidence.
+- Labelled elapsed times as execution details, not performance benchmarks.
+
 # Changelog
 
 ## 0.1.2

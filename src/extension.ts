@@ -1,12 +1,14 @@
 import { sidebarMarkup, parseSidebarMessage } from './sidebar';
 import * as vscode from 'vscode';
 import path from 'node:path';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
-import { Store, Service, Runner, Earth, Experiment, Command, git, repositoryRoot, readPackage, discoverCommands, applyPatch, compare, markdown } from './index';
+import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
+import { Store, Service, Runner, ExecutionQueue, QueueState, RunKind, fingerprint, validateCommand, Earth, Experiment, Command, git, repositoryRoot, readPackage, discoverCommands, applyPatch, compare, checkSeries, markdown } from './index';
 
 import { earthWorkspace } from './workspace';
 import { projectHistory, projectSummaries } from './history';
 import { homeMarkup, parseHomeMessage } from './home';
+import { setInterval as interval, clearInterval } from 'node:timers';
+import { setTimeout as delay } from 'node:timers/promises';
 import { randomUUID } from 'node:crypto';
 
 interface Item extends vscode.TreeItem { experimentId?: string; earthId?: string; projectRepository?: string }
@@ -16,7 +18,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const cfg = () => vscode.workspace.getConfiguration('parallelEarth');
   const root = cfg().get<string>('storageRoot') || context.globalStorageUri.fsPath;
   const service = new Service(new Store(root));
-  const runner = new Runner(cfg().get<number>('maxConcurrentRuns',1));
+  const runner = new Runner(1);
+  const queue = new ExecutionQueue(root);
+  const queueStates = new Map<string, QueueState>();
   const controllers = new Set<AbortController>();
   const running = new Set<string>();
   const deleting = new Set<string>();
@@ -150,20 +154,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         const exp=catalog.experiments.find(e=>e.id===parent.experimentId);if(!exp)return[];
         if(!parent.earthId)return[
           ...exp.earths.map(earth=>{
-            const state=earth.runs.at(-1)?.state??'NOT_RUN';
+            const state=checkSeries(earth.runs).summary;
             const item:Item=new vscode.TreeItem(earth.name,vscode.TreeItemCollapsibleState.None);
             item.id='earth:'+earth.id;item.experimentId=exp.id;item.earthId=earth.id;
-            const states:Record<string,string>={PASSED:'Checks passed',FAILED:'Checks failed',ERROR:'Check error',CANCELLED:'Cancelled',NOT_RUN:'Not checked'};
-            item.description=(earth.archived?'Archived | ':earth.baseline?'Baseline | ':'')+(running.has(earth.id)?'Running...':states[state]??state);
+            const states:Record<string,string>={PASSED:'Checks passed',FAILED:'Checks failed',ERROR:'Check error',CANCELLED:'Cancelled',NOT_RUN:'Not checked',UNSTABLE:'Unstable checks',INCONCLUSIVE:'Incomplete evidence'};
+            item.description=(earth.archived?'Archived | ':earth.baseline?'Baseline | ':'')+(queueStates.get(earth.id)==='QUEUED'?'Queued':queueStates.get(earth.id)==='RUNNING'?'Running':queueStates.get(earth.id)==='CANCELLED'?'Cancelled':states[state]??state);
             item.contextValue=earth.baseline?'parallelEarth.baseline':'parallelEarth.earth';
             item.command={command:'parallelEarth.openEarth',title:'Open Earth',arguments:[item]};
-            item.tooltip=earth.path+'\n'+(earth.baseline?'Committed baseline':'Alternative Earth');
+            item.tooltip='Setup: '+(earth.runs.findLast(r=>r.kind==='setup')?.state??'Not recorded')+'\nEarth working directory: '+earth.path+'\n'+(earth.baseline?'Committed baseline':'Alternative Earth')+'\nFresh Earths do not install dependencies. Right-click for Copy Path, Reveal Folder and Set Up Earth.';
             const icon=earth.baseline?'git-commit':state==='PASSED'?'pass':state==='FAILED'?'error':state==='ERROR'?'warning':'globe';
             const color=state==='PASSED'?'charts.green':state==='FAILED'?'charts.red':state==='ERROR'?'charts.yellow':'charts.blue';
             item.iconPath=new vscode.ThemeIcon(icon,new vscode.ThemeColor(color));return item;
           }),
           action('Create Earth','createEarth',parent),action('Compare evidence','compareEarths',parent),
-          action('Export report','exportReport',parent)
+          action('Export report','exportReport',parent),action('Repeat checks (baseline + alternatives)','repeatChecks',parent)
         ];
         return [];
       }catch(e){output.appendLine(String(e));return[action('Catalog unavailable - Show Diagnostics','showDiagnostics',{})];}
@@ -226,6 +230,72 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     {dispose:()=>{for(const controller of controllers)controller.abort();}},
     vscode.workspace.onDidChangeConfiguration(e=>{if(e.affectsConfiguration('parallelEarth.storageRoot')||e.affectsConfiguration('parallelEarth.maxConcurrentRuns'))void vscode.window.showInformationMessage('Reload the VS Code window to apply ParallelEarth storage or concurrency changes.');})
   );
+  const queuePoll = interval(()=>{
+    if(!vscode.workspace.isTrusted)return;
+    void queue.snapshot().then(snapshot=>{
+      for(const [id,value] of queueStates)if(value!=='CANCELLED')queueStates.delete(id);
+      for(const job of snapshot.queued)queueStates.set(job.earthId,'QUEUED');
+      if(snapshot.running)queueStates.set(snapshot.running.earthId,'RUNNING');
+      change.fire(undefined);
+    }).catch(error=>output.appendLine(String(error)));
+  },2000);queuePoll.unref();context.subscriptions.push({dispose:()=>clearInterval(queuePoll)});
+
+  async function chooseCheck(selected:Earth):Promise<Command|undefined>{
+    const commands=await discoverCommands(selected.path);
+    const choice=await vscode.window.showQuickPick([...commands.map(c=>({label:c.label,description:c.program+' '+c.args.join(' '),command:c})),{label:'Node test file…',description:'node --test <relative-file.js>',command:undefined}],{placeHolder:'Choose a check; use Set Up Earth first if dependencies are missing'});
+    if(!choice)return;
+    let command=choice.command;
+    if(!command){const file=await vscode.window.showInputBox({prompt:'Relative test file (e.g. test/reconcile.test.cjs)'});if(!file)return;command={program:'node',args:['--test',file],label:'node-test:'+file};}
+    validateCommand(command);return command;
+  }
+  async function executePlan(earths:Earth[],command:Command,kind:RunKind,count=1):Promise<void>{
+    trusted();validateCommand(command,kind);
+    const timeoutMs=cfg().get<number>('timeoutSeconds',120)*1000,maxBytes=cfg().get<number>('maxLogBytes',262144);
+    const approvals=new Map<string,string>();const descriptions:string[]=[];
+    for(const selected of earths){
+      await service.owned(selected);
+      if(selected.archived||running.has(selected.id))throw new Error('Earth is archived or already queued/running: '+selected.name);
+      approvals.set(selected.id,await fingerprint(selected.path,timeoutMs));
+      const scripts=await readPackage(selected.path);
+      if(command.program==='npm'&&command.args[0]==='run'&&!scripts[command.args[1]])throw new Error('Script missing in '+selected.name);
+      descriptions.push(selected.name+' — '+selected.path+(command.program==='npm'&&command.args[0]==='run'?'\nScript: '+scripts[command.args[1]]:''));
+    }
+    const description=(kind==='setup'?'SETUP':'CHECK')+': '+command.program+' '+command.args.join(' ')+'\n'+count+' run(s) per Earth; '+earths.length*count+' total.\n'+descriptions.join('\n')+
+      '\nOne command at a time across ParallelEarth windows sharing this storage. External processes and test workers are not controlled. Elapsed times are not benchmarks.\nCommands run with your privileges and may access files, credentials and network. Setup may download packages and execute lifecycle scripts. No dependencies are shared automatically.';
+    if(await vscode.window.showWarningMessage(description,{modal:true},'Approve and Run')!=='Approve and Run')return;
+    const controller=new AbortController();controllers.add(controller);for(const e of earths)running.add(e.id);
+    const batchId=count>1?randomUUID():undefined;
+    output.show(true);output.appendLine(description);
+    let stopped=false;
+    try{await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:kind==='setup'?'Set Up Earth':'Run approved checks',cancellable:true},async(progress,token)=>{
+      const cancel=token.onCancellationRequested(()=>controller.abort());if(token.isCancellationRequested)controller.abort();
+      try{for(const selected of earths){for(let index=1;index<=count;index++){
+        if(controller.signal.aborted){stopped=true;break;}
+        const queuedAt=Date.now();
+        const run=await queue.execute(selected.id,controller.signal,state=>{
+          queueStates.set(selected.id,state);progress.report({message:state+': '+selected.name+' '+index+'/'+count});change.fire(undefined);
+        },async()=>{
+          trusted();await service.owned(selected);
+          const current=(await service.store.load()).experiments.flatMap(e=>e.earths).find(e=>e.id===selected.id);
+          if(!current||current.archived)throw new Error('Earth removed or archived while queued.');
+          if(await fingerprint(selected.path,timeoutMs)!==approvals.get(selected.id))throw new Error('Manifest, lockfile or environment changed after approval. Review and approve again.');
+          if(kind==='check'&&selected.baseline&&((await git(selected.path,['status','--porcelain'])).trim()||(await git(selected.path,['rev-parse','HEAD'])).trim()!==selected.sourceCommit))throw new Error('Baseline has changes; preserve them manually or create a new experiment.');
+          const result=await runner.run(selected.id,selected.path,command,{approved:true,trusted:true,timeoutMs,maxBytes,signal:controller.signal,onOutput:value=>output.append(value),kind,batchId,repeatIndex:index,repeatTotal:count,queueScope:root,concurrencyLimit:1,queuedMs:Date.now()-queuedAt});
+          // Preserve completed evidence even if another catalog writer holds its lock.
+          const recovery=path.join(root,'run-recovery');await mkdir(recovery,{recursive:true});
+          const evidenceFile=path.join(recovery,result.id+'.json');await writeFile(evidenceFile,JSON.stringify(result));
+          for(let attempt=0;;attempt++){try{await service.record(selected,result);break;}catch(error){if(attempt>=60||!String(error).includes('Catalog busy'))throw new Error('Evidence retained at '+evidenceFile+'. '+String(error));await delay(250);}}
+          await unlink(evidenceFile);return result;
+        });
+        queueStates.delete(selected.id);output.appendLine('\n'+selected.name+' '+index+'/'+count+': '+run.state+'; elapsed '+run.durationMs+' ms (not a benchmark).');change.fire(undefined);
+        if(run.state==='CANCELLED'||run.state==='ERROR'){stopped=true;break;}
+      }if(stopped)break;}}
+      catch(error){if(controller.signal.aborted){stopped=true;output.appendLine('Cancelled. A queued command was not started; completed runs remain recorded.');}else throw error;}
+      finally{cancel.dispose();}
+    });
+      await vscode.window.showInformationMessage(stopped?'Stopped. Partial repeat series are inconclusive; completed runs are retained.':kind==='setup'?'Setup finished. Review its recorded status before running checks.':'Checks recorded. Compare evidence; elapsed times are not benchmarks.');
+    }finally{controllers.delete(controller);for(const e of earths){running.delete(e.id);if(controller.signal.aborted)queueStates.set(e.id,'CANCELLED');else queueStates.delete(e.id);}refresh();}
+  }
   const handlers: Record<string,(item?: Item)=>Promise<unknown>> = {
     async showHome() {await showHome();},
     async openExperiment(item) {
@@ -293,7 +363,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const label=await vscode.window.showInputBox({prompt:'Name this alternative for '+path.basename(exp.repository)+' ('+exp.repository+')',value:'Earth '+exp.earths.length});if(!label)return;
       const created = await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Creating detached Earth'},()=>service.createEarth(exp.id,label));
       await showExplorer();
-      const next = await vscode.window.showInformationMessage('Earth "'+created.name+'" created at '+created.path, 'Open Earth');
+      const next = await vscode.window.showInformationMessage('Earth "'+created.name+'" created at '+created.path, 'Open Earth','Set Up Earth','Copy Path');
+      if(next==='Set Up Earth')await handlers.setupEarth({experimentId:exp.id,earthId:created.id});
+      if(next==='Copy Path')await handlers.copyEarthPath({experimentId:exp.id,earthId:created.id});
       if(next === 'Open Earth') await handlers.openEarth({experimentId:exp.id,earthId:created.id});
     },
     async openEarth(item) {
@@ -326,37 +398,34 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if(await vscode.window.showWarningMessage('Apply this previewed patch to '+selected.name+'? Scripts are never run by patch import.',{modal:true},'Apply Patch')!=='Apply Patch')return;
       trusted();await service.owned(selected);await applyPatch(selected.path,patch);
     },
-    async runChecks(item) {
+    async copyEarthPath(item) {
+      trusted();const selected=await earth(item);if(!selected)return;await service.owned(selected);await vscode.env.clipboard.writeText(selected.path);
+      await vscode.window.showInformationMessage('Earth path copied: '+selected.path);
+    },
+    async revealEarthFolder(item) {
       trusted();const selected=await earth(item);if(!selected)return;await service.owned(selected);
-      if(selected.archived)throw new Error('Unarchive this Earth before running checks.');
-      if(running.has(selected.id))throw new Error('This Earth is already running.');
-      if(selected.baseline && ((await git(selected.path,['status','--porcelain'])).trim() || (await git(selected.path,['rev-parse','HEAD'])).trim()!==selected.sourceCommit))throw new Error('Baseline has changes; restore them manually or create a new experiment.');
-      const commands=await discoverCommands(selected.path);
-      const choice=await vscode.window.showQuickPick([...commands.map(c=>({label:c.label,description:c.program+' '+c.args.join(' '),command:c})),{label:'Node test file…',description:'node --test <relative-file.js>',command:undefined}],{placeHolder:'Choose a check (no dependency installation is performed)'});
-      if(!choice)return;
-      let command:Command|undefined=choice.command;
-      if(!command){const file=await vscode.window.showInputBox({prompt:'Relative test file (e.g. test/reconcile.test.cjs)'});if(!file)return;command={program:'node',args:['--test',file],label:'node-test:'+file};}
-      const {validateCommand}=await import('./domain.js');validateCommand(command);
+      await vscode.commands.executeCommand('revealFileInOS',vscode.Uri.file(selected.path));
+    },
+    async setupEarth(item) {
+      trusted();const selected=await earth(item);if(!selected)return;await service.owned(selected);
       const scripts=await readPackage(selected.path);
-      const description=command.program+' '+command.args.join(' ')+'\nDirectory: '+selected.path+
-        (command.program==='npm'?'\nScript: '+scripts[command.args[1]]:'')+
-        '\nRuns with your current user privileges. Repository code may access machine files and network. Logs may contain secrets. Worktrees are not sandboxes. No dependencies are installed automatically.';
-      if(await vscode.window.showWarningMessage(description,{modal:true},'Approve and Run')!=='Approve and Run')return;
-      trusted();await service.owned(selected);
-      const controller=new AbortController();controllers.add(controller);running.add(selected.id);
-      output.clear();output.show(true);output.appendLine(description);
-      const approved=command;
-      try {
-        await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Running '+selected.name+': '+command.label,cancellable:true},async(_,token)=>{
-          const cancellation=token.onCancellationRequested(()=>controller.abort());
-          try {
-            const run=await runner.run(selected.id,selected.path,approved,{approved:true,trusted:vscode.workspace.isTrusted,timeoutMs:cfg().get<number>('timeoutSeconds',120)*1000,maxBytes:cfg().get<number>('maxLogBytes',262144),signal:controller.signal,onOutput:s=>output.append(s)});
-            await service.record(selected,run);
-            output.appendLine('\n'+run.state+' · '+run.durationMs+' ms · '+run.id);
-            await vscode.window.showInformationMessage(selected.name+': '+run.state+'. This describes the approved command only.');
-          } finally {cancellation.dispose();}
-        });
-      } finally {controllers.delete(controller);running.delete(selected.id);}
+      const options=[{label:'npm ci',description:'Install from package-lock.json; may run lifecycle scripts',command:{program:'npm' as const,args:['ci'],label:'npm-ci'}},
+        {label:'npm install',description:'May change package-lock.json and run lifecycle scripts',command:{program:'npm' as const,args:['install'],label:'npm-install'}},
+        ...Object.keys(scripts).filter(key=>/^[a-zA-Z0-9_][a-zA-Z0-9:_-]*$/.test(key)).map(key=>({label:'npm run '+key,description:scripts[key],command:{program:'npm' as const,args:['run',key],label:key}}))];
+      const choice=await vscode.window.showQuickPick(options,{placeHolder:'Set up this Earth independently. Nothing runs until approved. Use an npm script for custom setup.'});
+      if(choice)await executePlan([selected],choice.command,'setup');
+    },
+    async runChecks(item) {
+      trusted();const selected=await earth(item);if(!selected)return;
+      const command=await chooseCheck(selected);if(command)await executePlan([selected],command,'check');
+    },
+    async repeatChecks(item) {
+      trusted();const exp=await experiment(item);if(!exp)return;
+      const baseline=exp.earths.find(e=>e.baseline);if(!baseline)throw new Error('Baseline missing.');
+      const choices=exp.earths.filter(e=>!e.baseline&&!e.archived).map(e=>({label:e.name,description:e.path,earth:e,picked:true}));
+      const picked=await vscode.window.showQuickPick(choices,{canPickMany:true,placeHolder:'Select alternatives; the baseline is always included'});if(!picked?.length)return;
+      const count=await vscode.window.showQuickPick(['3','5','10','2'],{placeHolder:'Runs per Earth (sequential). Every result is retained; this is not a benchmark.'});if(!count)return;
+      const command=await chooseCheck(baseline);if(command)await executePlan([baseline,...picked.map(p=>p.earth)],command,'check',Number(count));
     },
     async compareEarths(item) {
       trusted();const exp=await experiment(item);if(!exp)return;

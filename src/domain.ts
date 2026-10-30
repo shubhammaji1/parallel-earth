@@ -2,9 +2,12 @@ import { randomUUID } from 'node:crypto';
 
 export type State = 'PASSED' | 'FAILED' | 'INCONCLUSIVE' | 'NOT_RUN' | 'ERROR' | 'CANCELLED';
 export interface Command { program: 'node' | 'npm'; args: string[]; label: string }
+export type RunKind = 'check' | 'setup';
 export interface Run {
   id: string; earthId: string; command: Command; started: string; ended: string;
   state: State; exitCode: number | null; output: string; truncated: boolean;
+  kind?: RunKind; batchId?: string; repeatIndex?: number; repeatTotal?: number;
+  queueScope?: string; concurrencyLimit?: number; queuedMs?: number;
   durationMs: number; fingerprint: string; revision: string; changesHash: string; limitation: string;
 }
 export interface Earth {
@@ -29,10 +32,11 @@ function id(value: unknown): asserts value is string {
 }
 function commit(value: unknown): void { if (typeof value !== 'string' || !/^[0-9a-f]{40,64}$/.test(value)) throw new Error('Invalid commit'); }
 function date(value: unknown): void { if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) throw new Error('Invalid timestamp'); }
-export function validateCommand(value: Command): Command {
+export function validateCommand(value: Command, kind: RunKind = 'check'): Command {
   object(value); text(value.label, 100);
   if (!Array.isArray(value.args) || !value.args.every(a => typeof a === 'string')) throw new Error('Invalid command arguments');
   if (value.program === 'npm') {
+    if (kind === 'setup' && value.args.length === 1 && ['ci','install'].includes(value.args[0])) return value;
     if (value.args.length !== 2 || value.args[0] !== 'run' || !/^[a-zA-Z0-9_][a-zA-Z0-9:_-]*$/.test(value.args[1])) throw new Error('Select a simple npm script name');
   } else if (value.program === 'node') {
     if (value.args.length !== 2 || value.args[0] !== '--test' || !/^[a-zA-Z0-9_./-]+\.(?:cjs|mjs|js)$/.test(value.args[1]) || (value.args[1].startsWith('/') || value.args[1].startsWith('-')) || value.args[1].split('/').includes('..')) throw new Error('Node checks require node --test relative-file.js');
@@ -55,7 +59,14 @@ export function validateCatalog(value: unknown): Catalog {
       for (const run of earth.runs) {
         object(run); id(run.id); id(run.earthId); date(run.started); date(run.ended); text(run.output, 1100000); text(run.fingerprint); text(run.changesHash); commit(run.revision); text(run.limitation);
         if (run.earthId !== earth.id || !['PASSED','FAILED','INCONCLUSIVE','NOT_RUN','ERROR','CANCELLED'].includes(String(run.state)) || typeof run.truncated !== 'boolean' || typeof run.durationMs !== 'number' || !Number.isFinite(run.durationMs) || run.durationMs < 0 || !(run.exitCode === null || Number.isInteger(run.exitCode))) throw new Error('Invalid execution evidence');
-        validateCommand(run.command as Command);
+        if (run.kind !== undefined && !['check','setup'].includes(String(run.kind))) throw new Error('Invalid run kind');
+        if (run.batchId !== undefined) id(run.batchId);
+        if (run.repeatTotal !== undefined && (!Number.isInteger(run.repeatTotal) || Number(run.repeatTotal) < 1 || Number(run.repeatTotal) > 10)) throw new Error('Invalid repeat count');
+        if (run.repeatIndex !== undefined && (!Number.isInteger(run.repeatIndex) || Number(run.repeatIndex) < 1 || Number(run.repeatIndex) > Number(run.repeatTotal))) throw new Error('Invalid repeat index');
+        if (run.queueScope !== undefined) text(run.queueScope);
+        if (run.concurrencyLimit !== undefined && run.concurrencyLimit !== 1) throw new Error('Invalid shared concurrency');
+        if (run.queuedMs !== undefined && (typeof run.queuedMs !== 'number' || !Number.isFinite(run.queuedMs) || run.queuedMs < 0)) throw new Error('Invalid queued duration');
+        validateCommand(run.command as Command, (run.kind ?? 'check') as RunKind);
       }
     }
     if (exp.earths.filter(e => (e as Record<string, unknown>).baseline).length > 1) throw new Error('Duplicate baseline');

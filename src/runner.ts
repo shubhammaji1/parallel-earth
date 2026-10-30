@@ -3,9 +3,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
-import { Command, Run, validateCommand } from './domain';
+import { Command, Run, RunKind, validateCommand } from './domain';
 import { git, changes, readPackage } from './git';
-export interface RunOptions { approved: boolean; trusted: boolean; timeoutMs: number; maxBytes: number; signal?: AbortSignal; onOutput?: (text: string) => void }
+export interface RunOptions { approved: boolean; trusted: boolean; timeoutMs: number; maxBytes: number; signal?: AbortSignal; onOutput?: (text: string) => void; kind?: RunKind; batchId?: string; repeatIndex?: number; repeatTotal?: number; queueScope?: string; concurrencyLimit?: number; queuedMs?: number }
 export async function discoverCommands(target: string): Promise<Command[]> {
   return Object.keys(await readPackage(target)).filter(s => /^(test|build|lint|typecheck|check)(:|$)/.test(s) && /^[a-zA-Z0-9:_-]+$/.test(s)).map(label => ({program:'npm',args:['run',label],label}));
 }
@@ -22,7 +22,7 @@ export class Runner {
   constructor(maxConcurrent = 1) { if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 4) throw new Error('Invalid concurrency limit'); this.maxConcurrent = maxConcurrent; }
   async run(earthId: string, target: string, command: Command, options: RunOptions): Promise<Run> {
     if (!options.approved || !options.trusted) throw new Error('Explicit approval and Workspace Trust required');
-    validateCommand(command);
+    validateCommand(command, options.kind);
     if (!Number.isFinite(options.timeoutMs) || options.timeoutMs < 1 || options.timeoutMs > 3600000 || !Number.isInteger(options.maxBytes) || options.maxBytes < 1 || options.maxBytes > 1048576) throw new Error('Invalid execution limits');
     if (this.active >= this.maxConcurrent) throw new Error('Concurrency limit reached');
     this.active++;
@@ -39,7 +39,7 @@ export class Runner {
         // npm.cmd requires cmd.exe on Windows. Only a constrained script identifier reaches it.
         const isWin = process.platform === 'win32' && command.program === 'npm';
         const program = isWin ? (process.env.COMSPEC ?? 'cmd.exe') : command.program;
-        const args = isWin ? ['/d','/s','/c','npm.cmd run ' + command.args[1]] : command.args;
+        const args = isWin ? ['/d','/s','/c','npm.cmd ' + command.args.join(' ')] : command.args;
         const child = spawn(program,args,{cwd:target,env,shell:false,windowsHide:true,detached:process.platform !== 'win32',stdio:['ignore','pipe','pipe']});
         const append = (chunk: Buffer) => {
           const remaining = options.maxBytes - output.length;
@@ -61,7 +61,7 @@ export class Runner {
           clearTimeout(timer); options.signal?.removeEventListener('abort',abort);
           if (process.platform !== 'win32') kill();
           const state = cancelled ? 'CANCELLED' : timedOut || spawnError ? 'ERROR' : code === 0 ? 'PASSED' : code === null ? 'ERROR' : 'FAILED';
-          resolve({id:randomUUID(),earthId,command,started:new Date(start).toISOString(),ended:new Date().toISOString(),state,exitCode:code,output:output.toString('utf8'),truncated,durationMs:Date.now()-start,fingerprint:envFingerprint,revision,changesHash,limitation:timedOut ? 'Timeout exceeded' : spawnError || 'Command exit status only; individual assertions and coverage are not inferred. Installed dependencies, tools and external services may differ. Changes hash excludes untracked contents.'});
+          resolve({id:randomUUID(),earthId,command,started:new Date(start).toISOString(),ended:new Date().toISOString(),state,exitCode:code,output:output.toString('utf8'),truncated,durationMs:Date.now()-start,kind:options.kind??'check',batchId:options.batchId,repeatIndex:options.repeatIndex,repeatTotal:options.repeatTotal,queueScope:options.queueScope,concurrencyLimit:options.concurrencyLimit,queuedMs:options.queuedMs,fingerprint:envFingerprint,revision,changesHash,limitation:timedOut ? 'Timeout exceeded' : spawnError || 'Command exit status only; individual assertions and coverage are not inferred. Installed dependencies, tools and external services may differ. Changes hash excludes untracked contents. Elapsed time is not a benchmark; external processes and test workers can contend for resources.'});
         });
       });
     } finally { this.active--; }

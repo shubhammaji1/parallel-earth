@@ -204,7 +204,7 @@ npm run package
 For official VSIX packaging, create the output directory if needed and run:
 
 ```sh
-npx @vscode/vsce package --no-dependencies --out artifacts/parallel-earth-0.1.2.vsix
+npx @vscode/vsce package --no-dependencies --out artifacts/parallel-earth-0.2.0.vsix
 ```
 
 Use the version declared in `package.json` when naming release artifacts. The build transpiles TypeScript; semantic checking is the separate `typecheck` command. Packaging alone does not verify extension behaviour; test a clean installation before releasing an update.
@@ -225,3 +225,18 @@ Found a bug or a confusing step? [Open an issue](https://github.com/shubhammaji1
 ## License
 
 ParallelEarth is available under the [MIT License](https://github.com/shubhammaji1/parallel-earth/blob/main/LICENSE).
+
+
+## New in 0.2.0: setup and repeatable evidence
+
+Right-click an Earth for **Copy Earth Path**, **Reveal Earth Folder** or **Set Up Earth**. Fresh worktrees have no installed dependencies. Review and approve `npm ci`, `npm install` or a project setup script; setup outcomes are recorded separately from checks. Dependencies are never automatically shared.
+
+Use **Repeat Checks Against Baseline** on an experiment, choose alternatives, a command and 2–10 runs per Earth. Every completed run is retained (up to 50 per Earth). Incomplete or changed series are inconclusive; mixed pass/fail outcomes are labelled **UNSTABLE**. This identifies observed variation, not its cause. A later single check replaces the comparison summary; JSON preserves retained history.
+
+Setup and checks use one shared queue across windows using the same local storage root. Progress shows Queued, Running or Cancelled. Cancellation prevents queued commands from starting. Other tools, other roots, remote machines and test-runner workers are outside this queue. Elapsed times are not benchmarks. The old concurrency setting is deprecated and ignored.
+
+Reports include directory paths, setup status, commands, revisions, fingerprints, repeat outcomes and queue scope. Review paths and logs before sharing.
+
+### Interrupted execution queue
+
+An interrupted host may leave `execution-queue/active` beneath your storage root. ParallelEarth never automatically steals this lock: a child command may still be running. Close other ParallelEarth windows and verify/stop surviving commands before removing that **active directory only**, then retry. Do not share storage over a network filesystem.
