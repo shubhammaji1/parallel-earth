@@ -1,5 +1,7 @@
 # 0.5.0
 
+- Fixed structured-report capture and CI gates when the OS temporary root uses a symlink (including macOS /var); report-file symlinks remain refused.
+
 - Added approved app previews in managed terminals, separate loopback ports, Vite strict-port mode and open/stop actions.
 - Recorded actual PATH Node/npm versions and selected configuration hashes; exposed environment differences in the dashboard, live command and exports.
 - Added a standalone CLI and versioned CI recipes with baseline/candidate worktrees, repeated checks, optional setup, test-mapped criteria, JSON/Markdown reports and explicit exit gates.

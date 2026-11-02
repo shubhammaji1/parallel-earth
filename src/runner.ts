@@ -1,6 +1,6 @@
 import { spawn, execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { readFile, mkdtemp, writeFile, unlink, rmdir, open } from 'node:fs/promises';
+import { readFile, mkdtemp, writeFile, unlink, rmdir, open, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { Command, Run, RunKind, validateCommand } from './domain';
@@ -35,7 +35,9 @@ export class Runner {
       const changesHash = await workingHash(target);
       const environment=await captureEnvironment(target);
       const envFingerprint = await fingerprint(target,options.timeoutMs,environment); const start = Date.now();
-      if(options.kind!=='setup')captureDirectory=await mkdtemp(path.join(os.tmpdir(),'parallel-earth-report-'));
+      // macOS temp roots may contain OS-managed symlinks (/var -> /private/var).
+      // Resolve the root before creating our private directory; report-file links remain forbidden.
+      if(options.kind!=='setup')captureDirectory=await mkdtemp(path.join(await realpath(os.tmpdir()),'parallel-earth-report-'));
       const reportFile=captureDirectory?path.join(captureDirectory,'results.json'):undefined;
       if(reportFile)await writeFile(reportFile,'',{flag:'wx'});
       if (options.signal?.aborted) return {id:randomUUID(),earthId,command,started:new Date(start).toISOString(),ended:new Date().toISOString(),state:'CANCELLED',exitCode:null,output:'',truncated:false,durationMs:Date.now()-start,fingerprint:envFingerprint,revision,changesHash,environment,kind:options.kind??'check',batchId:options.batchId,repeatIndex:options.repeatIndex,repeatTotal:options.repeatTotal,queueScope:options.queueScope,concurrencyLimit:options.concurrencyLimit,queuedMs:options.queuedMs,limitation:'Cancelled during preparation; command was not launched.'};
