@@ -1,3 +1,10 @@
+# 0.3.0
+
+- Added previewed branch export with no source checkout/index changes and no existing-branch replacement.
+- Duplicate Current Earth now preserves current tracked and non-ignored untracked files, binary files and deletions, without copying check evidence.
+- Added live content/HEAD freshness checks in Explorer, comparisons and exports; stale baseline evidence blocks comparisons.
+- New run hashes include untracked contents; legacy hashes have unknown freshness. Changes during execution invalidate evidence.
+
 # 0.2.0
 
 - Added Copy Earth Path, Reveal Earth Folder and directory tooltips.

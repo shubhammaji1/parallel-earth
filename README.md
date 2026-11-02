@@ -90,7 +90,7 @@ Browser-only and virtual workspaces are unsupported. Development requires Node.j
 
 No demo project or experiment is created automatically. History contains the projects you create or resume.
 
-> Earths start from a committed revision. Uncommitted, untracked and ignored files from your original checkout are not automatically copied. Dependencies are not installed automatically. Duplicating an Earth starts from its original committed baseline, not its current edits.
+> Earths start from a committed revision. Uncommitted, untracked and ignored files from your original checkout are not automatically copied. Dependencies are not installed automatically. Duplicating an Earth copies its current working files, including tracked edits and non-ignored new files. Ignored files and previous check evidence are excluded.
 
 ## Example: compare a booking reconciliation fix
 
@@ -120,7 +120,7 @@ The demo creates a separate fixture repository and real Git worktrees. It writes
 - **Committed baselines:** pin the starting point to an exact Git revision.
 - **Separate Git worktrees:** edit alternatives without switching the original checkout's files.
 - **Readable Earth names:** identify alternatives in folder names and editor windows.
-- **Earth management:** rename, archive, unarchive and duplicate alternatives from the committed baseline.
+- **Earth management:** rename, archive, unarchive and duplicate alternatives with their current edits.
 - **Change inspection:** inspect tracked diffs and untracked filenames; preview and approve supported text patches.
 - **Approved checks:** discover npm test, build, lint, typecheck and check scripts, or select a Node test file.
 - **Recorded evidence:** retain command status, bounded output and run identifiers.
@@ -145,7 +145,7 @@ The original source repository is not a deletion target. Individual baseline del
 
 ### Does ParallelEarth merge changes back into my project?
 
-No automatic merge or transfer back to the source checkout is performed. Review the alternative's changes and use your normal Git workflow to bring them back. Keep the Earth until you have verified that your chosen changes are preserved.
+Use **Bring Changes Back** on an alternative Earth to preview its files and create a new named branch in the source repository. Existing branches are never overwritten; the source working files, index and checked-out branch stay in place. Review and merge or cherry-pick that branch using your normal Git workflow. Keep the Earth until you have verified that your chosen changes are preserved.
 
 ### Can I use it with AI coding tools?
 
@@ -204,7 +204,7 @@ npm run package
 For official VSIX packaging, create the output directory if needed and run:
 
 ```sh
-npx @vscode/vsce package --no-dependencies --out artifacts/parallel-earth-0.2.0.vsix
+npx @vscode/vsce package --no-dependencies --out artifacts/parallel-earth-0.3.0.vsix
 ```
 
 Use the version declared in `package.json` when naming release artifacts. The build transpiles TypeScript; semantic checking is the separate `typecheck` command. Packaging alone does not verify extension behaviour; test a clean installation before releasing an update.
@@ -240,3 +240,11 @@ Reports include directory paths, setup status, commands, revisions, fingerprints
 ### Interrupted execution queue
 
 An interrupted host may leave `execution-queue/active` beneath your storage root. ParallelEarth never automatically steals this lock: a child command may still be running. Close other ParallelEarth windows and verify/stop surviving commands before removing that **active directory only**, then retry. Do not share storage over a network filesystem.
+
+## New in 0.3.0: preserve alternatives and keep evidence current
+
+- **Bring Changes Back:** right-click an alternative, review the file diff, and approve creation of a new branch in the source repository. A snapshot commit preserves current working files on top of the Earth's HEAD history. The original checkout and index are retained. Existing branch names are refused. Resolve merge conflicts later using your normal Git workflow.
+- **Duplicate Current Earth:** copies the current tracked files and non-ignored new files, including binary files and deletions. Committed Earth changes are folded into the duplicate's changes against the experiment baseline. The duplicate starts with no check evidence; dependency setup is independent. Staging boundaries and ignored files are not copied.
+- **Stale evidence:** the explorer refreshes freshness while visible (approximately every 15 seconds), and comparison/export rechecks file contents and HEAD. Changed code or baseline evidence is labelled STALE and is not comparable. Legacy records show UNKNOWN until rerun. A command that changes files also invalidates its evidence. Raw command outcomes remain available in reports.
+
+Freshness hashes include tracked and non-ignored untracked files. Ignored files, installed dependencies and external service state are outside this check. Hashes do not prove that files stayed unchanged at every instant during a command. Symlinks and submodules are refused by snapshot/freshness inspection. Git clean/checkout filters may run during snapshot/copy operations in a trusted repository. Review new files for secrets before branch creation. A branch snapshot contains the working file state, not an independent copy of staged-only content. Snapshot objects can remain in Git even if branch creation is cancelled; normal Git maintenance manages unreachable objects.

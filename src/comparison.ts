@@ -4,39 +4,43 @@ export function checkSeries(runs: Run[]) {
   const checks = runs.filter(r => r.kind !== 'setup'), latest = checks.at(-1);
   const series = latest ? latest.batchId ? checks.filter(r => r.batchId === latest.batchId && sameCommand(r, latest)) : [latest] : [];
   const expected = latest?.repeatTotal ?? 1;
-  const consistent = !latest || series.every(r => r.fingerprint === latest.fingerprint && r.revision === latest.revision && r.changesHash === latest.changesHash);
+  const consistent = !latest || series.every(r => !r.changedDuringRun && r.fingerprint === latest.fingerprint && r.revision === latest.revision && r.changesHash === latest.changesHash);
   const complete = series.length === expected && (expected === 1 || new Set(series.map(r => r.repeatIndex)).size === expected && series.every(r => r.repeatTotal === expected && r.repeatIndex! >= 1 && r.repeatIndex! <= expected));
   const states = new Set(series.map(r => r.state));
   const unstable = consistent && states.has('PASSED') && states.has('FAILED');
   const summary = !latest ? 'NOT_RUN' : !consistent || !complete ? 'INCONCLUSIVE' : unstable ? 'UNSTABLE' : states.size === 1 ? latest.state : 'INCONCLUSIVE';
   return { latest, runs: series, expected, recorded: series.length, consistent, complete, unstable, summary };
 }
-export function compare(experiment: Experiment) {
+export type Freshness = 'CURRENT' | 'STALE' | 'UNKNOWN' | 'NOT_CHECKED';
+export function compare(experiment: Experiment, evidence?: Record<string,Freshness>) {
   const baseline = experiment.earths.find(e => e.baseline);
-  return {version:2,experimentId:experiment.id,name:experiment.name,repository:experiment.repository,baselineCommit:experiment.baselineCommit,generated:new Date().toISOString(),
+  return {version:3,experimentId:experiment.id,name:experiment.name,repository:experiment.repository,baselineCommit:experiment.baselineCommit,generated:new Date().toISOString(),
     limitations:['Command exit status is evidence for that command, not general correctness or individual test outcomes.',
       'Worktrees separate code state; commands can access this machine and network. Dependencies are not shared automatically.',
       'Fingerprints cover OS, extension Node, timeout, package manifest and lockfiles; installed dependencies and external services are not verified.',
       'Elapsed time is execution detail, not a performance benchmark. The shared queue does not control external processes, other storage roots or test-runner workers.',
-      'Evidence is historical; edit after a run requires rerunning checks. Untracked contents are excluded from the changes hash.',
+      'Freshness checks cover tracked and non-ignored untracked contents and HEAD. Ignored files and external services are excluded. Legacy hashes have unknown freshness; rerun checks.',
       'Repeated comparisons require complete, internally consistent series from the same batch. UNSTABLE indicates observed pass/fail variation, not a diagnosis of flakiness.',
       'Reports summarise the latest check series per Earth. JSON retains up to 50 runs per Earth, including setup. Missing history cannot establish stability.'],
     earths:experiment.earths.map(earth => {
       const result = checkSeries(earth.runs), latest = result.latest;
       const baseRuns = baseline?.runs.filter(r => r.kind !== 'setup' && latest && sameCommand(r, latest)) ?? [];
       const base = checkSeries(baseRuns);
+      const fresh = (runs: Run[]): Freshness => !evidence ? 'NOT_CHECKED' : runs.some(r=>evidence[r.id]==='STALE') ? 'STALE' :
+        runs.length && runs.every(r=>evidence[r.id]==='CURRENT') ? 'CURRENT' : 'UNKNOWN';
+      const freshness = fresh(result.runs), baselineFreshness = fresh(base.runs);
       const setup = earth.runs.findLast(r => r.kind === 'setup');
       const baseSetup = baseline?.runs.findLast(r => r.kind === 'setup');
       const setupUnchanged = (!setup || !!latest && setup.ended <= latest.started) && (!baseSetup || !!base.latest && baseSetup.ended <= base.latest.started);
       const sameBatch = (result.expected === 1 && base.expected === 1) || !!latest?.batchId && latest.batchId === base.latest?.batchId && result.expected === base.expected;
-      const comparable = !!latest && !!base.latest && latest.fingerprint === base.latest.fingerprint && result.consistent && base.consistent && result.complete && base.complete && sameBatch && setupUnchanged;
+      const comparable = (!evidence || freshness==='CURRENT' && baselineFreshness==='CURRENT') && !!latest && !!base.latest && latest.fingerprint === base.latest.fingerprint && result.consistent && base.consistent && result.complete && base.complete && sameBatch && setupUnchanged;
       const unstable = result.unstable || base.unstable;
-      const outcome = !latest ? 'NOT_RUN' : !comparable ? 'INCONCLUSIVE' : unstable ? 'UNSTABLE' :
+      const outcome = !latest ? 'NOT_RUN' : freshness==='STALE' || baselineFreshness==='STALE' ? 'STALE' : !comparable ? 'INCONCLUSIVE' : unstable ? 'UNSTABLE' :
         base.summary === 'PASSED' && result.summary === 'FAILED' ? 'REGRESSION' :
         base.summary === 'FAILED' && result.summary === 'PASSED' ? 'IMPROVEMENT' :
         base.summary === 'FAILED' && result.summary === 'FAILED' ? 'BASELINE_FAILURE' :
         ['PASSED','FAILED','ERROR','CANCELLED'].includes(result.summary) && base.summary === result.summary ? result.summary : 'INCONCLUSIVE';
-      return {id:earth.id,name:earth.name,path:earth.path,baseline:earth.baseline,archived:earth.archived,state:result.summary,outcome,comparable,
+      return {id:earth.id,name:earth.name,path:earth.path,baseline:earth.baseline,archived:earth.archived,state:freshness==='STALE'?'STALE':result.summary,outcome,comparable,freshness,baselineFreshness,
         setupStatus:setup?.state??'NOT_RUN',latestSetup:setup??null,repeat:{expected:result.expected,recorded:result.recorded,complete:result.complete,consistent:result.consistent,unstable:result.unstable},
         latestRun:latest??null,series:result.runs,runs:earth.runs};
     })};
@@ -51,8 +55,8 @@ export function markdown(report: Report): string {
     '\n  - Queue scope: '+cell(r.queueScope??'Not recorded (legacy or direct SDK run)')+'; concurrency limit: '+(r.concurrencyLimit??'Not recorded')+'; waited: '+(r.queuedMs??'Not recorded')+' ms'+
     '\n  - Exit: '+r.exitCode+'; output truncated: '+r.truncated+'; batch: '+(r.batchId??'none')+'\n  - '+cell(r.limitation);
   return '# ParallelEarth — ' + cell(report.name) + '\n\nRepository: '+cell(report.repository)+'\nBaseline: '+report.baselineCommit+'\nGenerated: '+report.generated+
-    '\n\n| Earth | Setup | Check status | Comparison | Runs / requested | Elapsed (not benchmark) |\n| --- | --- | --- | --- | --- | --- |\n'+
-    report.earths.map(e=>'| '+cell(e.name)+' | '+e.setupStatus+' | '+e.state+' | '+e.outcome+' | '+e.repeat.recorded+' / '+e.repeat.expected+' | '+(e.latestRun?e.latestRun.durationMs+' ms':'—')+' |').join('\n')+
+    '\n\n| Earth | Setup | Check status | Freshness | Comparison | Runs / requested | Elapsed (not benchmark) |\n| --- | --- | --- | --- | --- | --- | --- |\n'+
+    report.earths.map(e=>'| '+cell(e.name)+' | '+e.setupStatus+' | '+e.state+' | '+e.freshness+' | '+e.outcome+' | '+e.repeat.recorded+' / '+e.repeat.expected+' | '+(e.latestRun?e.latestRun.durationMs+' ms':'—')+' |').join('\n')+
     '\n\n## Evidence limits\n\n'+report.limitations.map(l=>'- '+l).join('\n')+
     '\n\n## Execution evidence\n\n'+report.earths.map(e=>'### '+cell(e.name)+'\n\nDirectory: '+cell(e.path)+'\n\n'+
       (e.latestSetup?'Latest approved setup:\n\n'+evidence(e.latestSetup)+'\n\n':'Setup: no recorded setup run. Dependencies may have been installed manually.\n\n')+

@@ -9,6 +9,7 @@ export interface Run {
   kind?: RunKind; batchId?: string; repeatIndex?: number; repeatTotal?: number;
   queueScope?: string; concurrencyLimit?: number; queuedMs?: number;
   durationMs: number; fingerprint: string; revision: string; changesHash: string; limitation: string;
+  changedDuringRun?: boolean;
 }
 export interface Earth {
   id: string; experimentId: string; name: string; sourceCommit: string; path: string;
@@ -60,6 +61,7 @@ export function validateCatalog(value: unknown): Catalog {
         object(run); id(run.id); id(run.earthId); date(run.started); date(run.ended); text(run.output, 1100000); text(run.fingerprint); text(run.changesHash); commit(run.revision); text(run.limitation);
         if (run.earthId !== earth.id || !['PASSED','FAILED','INCONCLUSIVE','NOT_RUN','ERROR','CANCELLED'].includes(String(run.state)) || typeof run.truncated !== 'boolean' || typeof run.durationMs !== 'number' || !Number.isFinite(run.durationMs) || run.durationMs < 0 || !(run.exitCode === null || Number.isInteger(run.exitCode))) throw new Error('Invalid execution evidence');
         if (run.kind !== undefined && !['check','setup'].includes(String(run.kind))) throw new Error('Invalid run kind');
+        if (run.changedDuringRun !== undefined && typeof run.changedDuringRun !== 'boolean') throw new Error('Invalid evidence change flag');
         if (run.batchId !== undefined) id(run.batchId);
         if (run.repeatTotal !== undefined && (!Number.isInteger(run.repeatTotal) || Number(run.repeatTotal) < 1 || Number(run.repeatTotal) > 10)) throw new Error('Invalid repeat count');
         if (run.repeatIndex !== undefined && (!Number.isInteger(run.repeatIndex) || Number(run.repeatIndex) < 1 || Number(run.repeatIndex) > Number(run.repeatTotal))) throw new Error('Invalid repeat index');

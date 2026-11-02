@@ -153,19 +153,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         }
         const exp=catalog.experiments.find(e=>e.id===parent.experimentId);if(!exp)return[];
         if(!parent.earthId)return[
-          ...exp.earths.map(earth=>{
-            const state=checkSeries(earth.runs).summary;
+          ...await Promise.all(exp.earths.map(async earth=>{
+            const latest=checkSeries(earth.runs).latest;
+            const freshness=latest?(await service.freshness(earth))[latest.id]:undefined;
+            const state=freshness==='STALE'?'STALE':freshness==='UNKNOWN'?'INCONCLUSIVE':checkSeries(earth.runs).summary;
             const item:Item=new vscode.TreeItem(earth.name,vscode.TreeItemCollapsibleState.None);
             item.id='earth:'+earth.id;item.experimentId=exp.id;item.earthId=earth.id;
-            const states:Record<string,string>={PASSED:'Checks passed',FAILED:'Checks failed',ERROR:'Check error',CANCELLED:'Cancelled',NOT_RUN:'Not checked',UNSTABLE:'Unstable checks',INCONCLUSIVE:'Incomplete evidence'};
-            item.description=(earth.archived?'Archived | ':earth.baseline?'Baseline | ':'')+(queueStates.get(earth.id)==='QUEUED'?'Queued':queueStates.get(earth.id)==='RUNNING'?'Running':queueStates.get(earth.id)==='CANCELLED'?'Cancelled':states[state]??state);
+            const states:Record<string,string>={STALE:'Code changed - rerun checks',PASSED:'Checks passed',FAILED:'Checks failed',ERROR:'Check error',CANCELLED:'Cancelled',NOT_RUN:'Not checked',UNSTABLE:'Unstable checks',INCONCLUSIVE:'Incomplete evidence'};
+            item.description=(earth.archived?'Archived | ':earth.baseline?'Baseline | ':'')+(queueStates.get(earth.id)==='QUEUED'?'Queued':queueStates.get(earth.id)==='RUNNING'?'Running':queueStates.get(earth.id)==='CANCELLED'?'Cancelled':freshness==='UNKNOWN'?'Freshness unknown - rerun checks':states[state]??state);
             item.contextValue=earth.baseline?'parallelEarth.baseline':'parallelEarth.earth';
             item.command={command:'parallelEarth.openEarth',title:'Open Earth',arguments:[item]};
             item.tooltip='Setup: '+(earth.runs.findLast(r=>r.kind==='setup')?.state??'Not recorded')+'\nEarth working directory: '+earth.path+'\n'+(earth.baseline?'Committed baseline':'Alternative Earth')+'\nFresh Earths do not install dependencies. Right-click for Copy Path, Reveal Folder and Set Up Earth.';
-            const icon=earth.baseline?'git-commit':state==='PASSED'?'pass':state==='FAILED'?'error':state==='ERROR'?'warning':'globe';
-            const color=state==='PASSED'?'charts.green':state==='FAILED'?'charts.red':state==='ERROR'?'charts.yellow':'charts.blue';
+            const icon=state==='STALE'?'warning':earth.baseline?'git-commit':state==='PASSED'?'pass':state==='FAILED'?'error':state==='ERROR'?'warning':'globe';
+            const color=state==='PASSED'?'charts.green':state==='FAILED'?'charts.red':state==='ERROR'||state==='STALE'?'charts.yellow':'charts.blue';
             item.iconPath=new vscode.ThemeIcon(icon,new vscode.ThemeColor(color));return item;
-          }),
+          })),
           action('Create Earth','createEarth',parent),action('Compare evidence','compareEarths',parent),
           action('Export report','exportReport',parent),action('Repeat checks (baseline + alternatives)','repeatChecks',parent)
         ];
@@ -230,13 +232,17 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     {dispose:()=>{for(const controller of controllers)controller.abort();}},
     vscode.workspace.onDidChangeConfiguration(e=>{if(e.affectsConfiguration('parallelEarth.storageRoot')||e.affectsConfiguration('parallelEarth.maxConcurrentRuns'))void vscode.window.showInformationMessage('Reload the VS Code window to apply ParallelEarth storage or concurrency changes.');})
   );
+  let lastQueueSnapshot='';
+  const freshnessPoll=interval(()=>{if(vscode.workspace.isTrusted&&explorerView.visible)change.fire(undefined);},15000);
+  freshnessPoll.unref();context.subscriptions.push({dispose:()=>clearInterval(freshnessPoll)});
   const queuePoll = interval(()=>{
     if(!vscode.workspace.isTrusted)return;
     void queue.snapshot().then(snapshot=>{
       for(const [id,value] of queueStates)if(value!=='CANCELLED')queueStates.delete(id);
       for(const job of snapshot.queued)queueStates.set(job.earthId,'QUEUED');
       if(snapshot.running)queueStates.set(snapshot.running.earthId,'RUNNING');
-      change.fire(undefined);
+      const state=JSON.stringify([...queueStates]);
+      if(state!==lastQueueSnapshot){lastQueueSnapshot=state;change.fire(undefined);}
     }).catch(error=>output.appendLine(String(error)));
   },2000);queuePoll.unref();context.subscriptions.push({dispose:()=>clearInterval(queuePoll)});
 
@@ -380,8 +386,21 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
     async duplicateEarth(item) {
       trusted();const selected=await earth(item,false);if(!selected)return;
-      const label=await vscode.window.showInputBox({prompt:'New Earth from the same committed baseline; manual edits are not copied',value:selected.name+' copy'});
-      if(label)await service.createEarth(selected.experimentId,label);
+      if(running.has(selected.id))throw new Error('Wait until this Earth finishes running.');
+      const label=await vscode.window.showInputBox({prompt:'Duplicate current files, including non-ignored new files. Ignored files and check evidence are excluded.',value:selected.name+' copy'});
+      if(label)await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Duplicating current Earth files'},()=>service.duplicateCurrent(selected,label));
+    },
+    async bringChangesBack(item) {
+      trusted();const selected=await earth(item,false);if(!selected)return;
+      if(running.has(selected.id))throw new Error('Wait until this Earth finishes running.');
+      const preview=await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Preparing changes preview'},()=>service.previewBringBack(selected));
+      await text(preview.preview||'No file differences from the experiment baseline.','diff');
+      const branch=await vscode.window.showInputBox({prompt:'New branch in the source repository to preserve this Earth',value:'parallel-earth/'+selected.id.slice(0,8)});
+      if(!branch)return;
+      if(await vscode.window.showWarningMessage('Create branch '+branch+' in '+(await service.owned(selected)).repository+' with the previewed files? Includes tracked and non-ignored new files. Review new files for secrets. Ignored files are excluded. The source checkout stays in place. Merge conflicts are resolved later using your Git workflow.',{modal:true},'Create Branch')!=='Create Branch')return;
+      trusted();
+      const commit=await vscode.window.withProgress({location:vscode.ProgressLocation.Notification,title:'Preserving Earth on a new branch'},()=>service.bringBack(selected,branch,preview));
+      await text('# Changes preserved\n\nBranch: `'+branch+'`\n\nCommit: `'+commit+'`\n\nReview this branch in the source repository, then merge or cherry-pick using your normal Git workflow. Source working files and index were retained.');
     },
     async inspectChanges(item) {
       trusted();const selected=await earth(item);if(!selected)return;
@@ -429,14 +448,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
     async compareEarths(item) {
       trusted();const exp=await experiment(item);if(!exp)return;
-      await text(markdown(compare(exp)));
+      await text(markdown(await service.report(exp)));
     },
     async exportReport(item) {
       trusted();const exp=await experiment(item);if(!exp)return;
       const format=await vscode.window.showQuickPick(['Markdown','JSON (includes retained execution logs)'],{placeHolder:'Choose report format; review for secrets before sharing'});if(!format)return;
       const json=format.startsWith('JSON'), ext=json?'json':'md';
       const file=await vscode.window.showSaveDialog({defaultUri:vscode.Uri.file(path.join(vscode.workspace.workspaceFolders?.[0]?.uri.fsPath??root,'parallel-earth-report.'+ext)),filters:{Report:[ext]}});if(!file)return;
-      const report=compare(exp);
+      const report=await service.report(exp);
       await writeFile(file.fsPath,json?JSON.stringify(report,null,2):markdown(report),'utf8');
       await vscode.window.showInformationMessage('Report exported: '+file.fsPath);
     },

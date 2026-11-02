@@ -24,7 +24,7 @@ test('shared queue serializes actual separate Node host processes',()=>temp(asyn
  const modulePath=path.resolve('dist/index.js'),worker=path.join(root,'worker.cjs');
  await fs.writeFile(worker,`const {ExecutionQueue}=require(${JSON.stringify(modulePath)});const fs=require('node:fs/promises');new ExecutionQueue(process.argv[2]).execute(process.argv[3],undefined,()=>{},async()=>{await fs.appendFile(process.argv[4],'start '+process.argv[3]+'\\n');await new Promise(r=>setTimeout(r,100));await fs.appendFile(process.argv[4],'end '+process.argv[3]+'\\n');}).catch(e=>{console.error(e);process.exitCode=1;});`);
  const log=path.join(root,'events');
- const launch=id=>new Promise((resolve,reject)=>{const child=fork(worker,[root,id,log],{stdio:'ignore'});child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(Error('worker exit '+code)));});
+ const launch=id=>new Promise((resolve,reject)=>{const child=fork(worker,[root,id,log],{stdio:['ignore','ignore','pipe','ipc']});let error='';child.stderr.on('data',chunk=>error+=chunk);child.on('error',reject);child.on('exit',code=>code===0?resolve():reject(Error('worker exit '+code+': '+error)));});
  await Promise.all([launch('one'),launch('two'),launch('three')]);
  const lines=(await fs.readFile(log,'utf8')).trim().split('\n');assert.equal(lines.length,6);
  for(let i=0;i<6;i+=2)assert.equal(lines[i].replace('start','end'),lines[i+1]);

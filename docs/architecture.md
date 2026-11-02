@@ -18,9 +18,13 @@ Catalog reads/writes undergo runtime validation. Unknown schema versions and cor
 
 Only known npm scripts or relative Node test files execute. Other commands are argument arrays with shell:false. Windows npm.cmd needs cmd.exe; only constrained script identifiers enter that adapter. This avoids accidental command injection, not malicious approved scripts.
 
-Run fingerprints cover platform, extension Node, timeout, package manifest and lockfiles. They exclude installed dependency integrity, actual PATH binary identities and external services. Diff hashes exclude untracked contents. Comparisons remain historical, coarse command-level evidence. Native Markdown reports remain the evidence view. A branded home Webview uses escaped HTML, local resource roots, nonce CSP and an explicit action/ID message protocol; project history and active experiment selection are native TreeViews.
+Run fingerprints cover platform, extension Node, timeout, package manifest and lockfiles. They exclude installed dependency integrity, actual PATH binary identities and external services. Content hashes include tracked and non-ignored untracked files. Service.report checks current HEAD and contents before comparing; legacy hashes have unknown freshness. Commands record whether files changed during execution. Comparisons remain coarse command-level evidence. Native Markdown reports remain the evidence view. A branded home Webview uses escaped HTML, local resource roots, nonce CSP and an explicit action/ID message protocol; project history and active experiment selection are native TreeViews.
 
 Registry access failed during development, so core dependencies were avoided and node:test replaces Vitest. Local TypeScript 5.9.3 supports the build. Normal development tooling is declared in package.json; a registry-generated lockfile is a release gate. An offline VSIX writer is separate from official Marketplace tooling.
 
 
 Home and history are derived from persisted user-created experiments, with incomplete creation attempts excluded from normal history. Active selection is per-window memory and starts empty. F5 targets a generated workspace with an empty folders array, preventing previous-folder restoration without creating sample data. Catalog data is never seeded at activation.
+
+## 0.3 snapshots and branch preservation
+
+Snapshots use a unique temporary Git index populated from HEAD and current files. The real source index is never used for staging the snapshot. Duplicate Earth materialises the snapshot tree in a newly owned worktree at the experiment baseline. Bring Changes Back creates a commit with the snapshot tree and Earth HEAD parent, then creates a branch with an absent-ref precondition. Preview approval is tied to the revision, raw contents hash and snapshot tree. Existing branches cannot be overwritten. No checkout, merge, reset or stash occurs in the original source worktree.

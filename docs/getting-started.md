@@ -12,7 +12,7 @@ Run identical checks for baseline and alternatives with matching settings. **Com
 
 **Inspect Changes** shows tracked diff against source, including staged and unstaged changes, plus untracked filenames. Untracked contents are excluded. **Apply Patch** previews and requests approval for small plain-text Git patches. Renames, quoted paths, symlink patches and binary patches are unsupported.
 
-**Archive Earth** toggles archive state. **Duplicate Earth Baseline** creates another clean worktree at the same source commit; edits are not copied.
+**Archive Earth** toggles archive state. **Duplicate Current Earth** creates another worktree with current edits and non-ignored new files. Ignored files, staging boundaries and check history are not copied.
 
 **Delete Earth** requires confirmation and refuses tracked edits, untracked/ignored files, new commits, baselines, symlink paths and unowned directories. Preserve work manually first. There is no automatic cleanup.
 
@@ -35,3 +35,9 @@ F5 prepares an explicit empty workspace, opens ParallelEarth home, and creates n
 Deletion is available from home project rows, experiment context menus or Delete Experiment. Remove from History keeps Earth folders; Delete Clean Worktrees first verifies every worktree is owned, clean and at its source commit. Dirty or otherwise unpreserved work prevents cleanup. The original project is always retained. Failed creation records are hidden from normal history but can be selected in Delete Experiment.
 
 For setup, directory actions, repeated checks and queue recovery, see the README section “New in 0.2.0”. Commands now run sequentially across windows sharing storage.
+
+## Preserve your selected Earth (0.3)
+
+Right-click an alternative and choose **Bring Changes Back**. Review the preview, choose a new branch name, then approve creation. Review that branch in the source repository and merge/cherry-pick using your normal Git workflow. No checkout switch or automatic merge occurs.
+
+Use **Duplicate Current Earth** to try a variation of current files. Non-ignored new files are included; ignored files and check results are excluded. STALE means files or HEAD changed since a check; rerun the baseline and alternative. UNKNOWN means the old evidence cannot establish freshness. Use Refresh for an immediate update; visible Explorer checks freshness periodically.

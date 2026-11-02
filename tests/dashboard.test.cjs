@@ -4,8 +4,10 @@ const file=path.resolve('dist/extension.js'),realRequire=createRequire(file);
 const disposable=()=>({dispose(){}});
 function host(visible=false,trusted=false){
  const views=[],panels=[],commands=new Map(),output=[],providers=new Map(),executed=[];
- const catalog={version:1,experiments:[]};
- const core={...realRequire('./index'),Store:class{constructor(root){this.root=root;}async load(){return catalog;}}};
+ const catalog={version:1,experiments:[]},freshnessOverrides=new Map();
+ const base=realRequire('./index');
+ const core={...base,Store:class{constructor(root){this.root=root;}async load(){return catalog;}},
+  Service:class extends base.Service{async freshness(earth){return freshnessOverrides.has(earth.id)?Object.fromEntries(earth.runs.map(r=>[r.id,freshnessOverrides.get(earth.id)])):super.freshness(earth);}}};
  const uri=fsPath=>({fsPath});
  const vscode={
   TreeItem:class{constructor(label,collapsibleState){this.label=label;this.collapsibleState=collapsibleState;}},TreeItemCollapsibleState:{None:0,Collapsed:1,Expanded:2},ThemeIcon:class{constructor(id,color){this.id=id;this.color=color;}},ThemeColor:class{constructor(id){this.id=id;}},
@@ -36,7 +38,7 @@ function host(visible=false,trusted=false){
  const module={exports:{}};
  vm.runInNewContext(fs.readFileSync(file,'utf8'),{require:id=>id==='vscode'?vscode:id==='./index'?core:realRequire(id),exports:module.exports,module,console});
  const context={subscriptions:[],extensionMode:vscode.ExtensionMode.Production,globalStorageUri:uri(path.resolve('artifacts/dashboard-test-storage')),extensionUri:uri(process.cwd()),extension:{packageJSON:{version:'0.1.1'}}};
- return {...module.exports,context,views,panels,commands,output,providers,catalog,executed};
+ return {...module.exports,context,views,panels,commands,output,providers,catalog,executed,freshnessOverrides};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 test('installed extension opens Home when the sidebar becomes visible, without duplicate dashboards',async()=>{
@@ -86,7 +88,7 @@ test('sidebar launchpad exposes branded navigation and accepts only its explicit
 test('active experiment displays flat Earth rows with friendly status and contextual actions',async()=>{
  const h=host(false,true);await h.activate(h.context);
  const baseline={id:'base',baseline:true,name:'Baseline',path:'/baseline',runs:[],archived:false};
- const alternative={id:'alt',baseline:false,name:'Faster checkout',path:'/alternative',runs:[{state:'PASSED'}],archived:false};
+ const alternative={id:'alt',baseline:false,name:'Faster checkout',path:'/alternative',runs:[{id:'run-alt',state:'PASSED'}],archived:false};
  const exp={id:'experiment',name:'Checkout experiment',repository:'/project',baselineCommit:'a'.repeat(40),created:'2026-10-27T00:00:00Z',earths:[baseline,alternative]};
  h.catalog.experiments.push(exp);
  await h.commands.get('parallelEarth.openExperiment')({experimentId:exp.id});
@@ -97,7 +99,13 @@ test('active experiment displays flat Earth rows with friendly status and contex
  const earths=children.filter(item=>item.earthId);
  assert.equal(earths.length,2);
  assert.equal(earths[0].description,'Baseline | Not checked');
- assert.equal(earths[1].description,'Checks passed');
+ assert.equal(earths[1].description,'Freshness unknown - rerun checks');
+ h.freshnessOverrides.set('alt','CURRENT');
+ assert.equal((await provider.getChildren(roots[0])).find(e=>e.earthId==='alt').description,'Checks passed');
+ h.freshnessOverrides.set('alt','STALE');
+ const stale=(await provider.getChildren(roots[0])).find(e=>e.earthId==='alt');
+ assert.equal(stale.description,'Code changed - rerun checks');
+ assert.equal(stale.iconPath.id,'warning');
  assert.equal(earths[1].collapsibleState,0);
  assert.equal(earths[1].command.command,'parallelEarth.openEarth');
  assert.equal(children.some(item=>item.command?.command==='parallelEarth.deleteExperiment'),false);

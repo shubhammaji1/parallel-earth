@@ -2,15 +2,55 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
 import { lstat, realpath, readFile, mkdir, writeFile, unlink } from 'node:fs/promises';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { isEarthPath } from './workspace';
+import { createReadStream } from 'node:fs';
 const exec = promisify(execFile);
-export async function git(cwd: string, args: string[]): Promise<string> {
+export async function git(cwd: string, args: string[], indexFile?: string): Promise<string> {
   const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !/^GIT_/i.test(k)));
   const result = await exec('git', ['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','submodule.recurse=false', ...args], {
-    cwd, env: { ...env, GIT_TERMINAL_PROMPT: '0' }, maxBuffer: 4 * 1024 * 1024, timeout: 30000, windowsHide: true
+    cwd, env: { ...env, GIT_TERMINAL_PROMPT: '0', ...(indexFile ? {GIT_INDEX_FILE:indexFile} : {}) }, maxBuffer: 4 * 1024 * 1024, timeout: 30000, windowsHide: true
   });
   return result.stdout;
+}
+// Hash actual working files, including binary and non-ignored untracked contents.
+// Read files directly: evidence inspection must not execute checkout/clean filters.
+export async function workingHash(target: string): Promise<string> {
+  const hash = createHash('sha256');
+  const files = (await git(target,['ls-files','--cached','--others','--exclude-standard','-z'])).split('\0').filter(Boolean);
+  for (const file of [...new Set(files)].sort()) {
+    const absolute = path.resolve(target,file);
+    if (!contained(target,absolute)) throw new Error('File escapes worktree');
+    await noSymlinks(absolute);
+    hash.update(JSON.stringify(file));
+    try {
+      const stat = await lstat(absolute);
+      if (!stat.isFile()) throw new Error('Unsupported file or submodule: '+file);
+      hash.update(String(stat.mode & 0o111));
+      hash.update(String(stat.size)+':');
+      for await (const bytes of createReadStream(absolute)) hash.update(bytes);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+      hash.update('MISSING');
+    }
+  }
+  return 'files-v1:'+hash.digest('hex');
+}
+export interface Snapshot { revision: string; hash: string; tree: string }
+export async function snapshot(target: string): Promise<Snapshot> {
+  if ((await git(target,['ls-files','--unmerged','-z'])).length) throw new Error('Resolve merge conflicts before preserving this Earth');
+  const revision = await resolveCommit(target,'HEAD'), hash = await workingHash(target);
+  const index = path.join(path.dirname(target),'snapshot-'+randomUUID()+'.index');
+  try {
+    await git(target,['read-tree',revision],index);
+    await git(target,['add','--all','--','.'],index);
+    const tree = (await git(target,['write-tree'],index)).trim();
+    if (await workingHash(target) !== hash || await resolveCommit(target,'HEAD') !== revision) throw new Error('Earth changed during snapshot; retry');
+    return {revision,hash,tree};
+  } finally {
+    await unlink(index).catch(()=>{});
+    await unlink(index+'.lock').catch(()=>{});
+  }
 }
 export function contained(root: string, candidate: string): boolean {
   const relative = path.relative(path.resolve(root), path.resolve(candidate));

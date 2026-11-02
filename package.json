@@ -2,7 +2,7 @@
   "name": "parallel-earth",
   "displayName": "ParallelEarth",
   "description": "Explore alternate futures. Verify before you change. Local worktree experiments with real check evidence.",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "publisher": "shubhammaji1",
   "license": "MIT",
   "engines": {
@@ -78,7 +78,7 @@
       },
       {
         "command": "parallelEarth.duplicateEarth",
-        "title": "ParallelEarth: Duplicate Earth Baseline",
+        "title": "ParallelEarth: Duplicate Current Earth",
         "icon": "$(files)"
       },
       {
@@ -172,6 +172,11 @@
         "command": "parallelEarth.repeatChecks",
         "title": "ParallelEarth: Repeat Checks Against Baseline",
         "icon": "$(run-all)"
+      },
+      {
+        "command": "parallelEarth.bringChangesBack",
+        "title": "ParallelEarth: Bring Changes Back",
+        "icon": "$(git-branch)"
       }
     ],
     "viewsContainers": {
@@ -318,6 +323,11 @@
           "command": "parallelEarth.repeatChecks",
           "when": "viewItem == parallelEarth.experiment",
           "group": "evidence@26"
+        },
+        {
+          "command": "parallelEarth.bringChangesBack",
+          "when": "viewItem == parallelEarth.earth",
+          "group": "edit@4"
         }
       ]
     },

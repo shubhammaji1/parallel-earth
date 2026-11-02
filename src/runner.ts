@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { Command, Run, RunKind, validateCommand } from './domain';
-import { git, changes, readPackage } from './git';
+import { git, workingHash, readPackage } from './git';
 export interface RunOptions { approved: boolean; trusted: boolean; timeoutMs: number; maxBytes: number; signal?: AbortSignal; onOutput?: (text: string) => void; kind?: RunKind; batchId?: string; repeatIndex?: number; repeatTotal?: number; queueScope?: string; concurrencyLimit?: number; queuedMs?: number }
 export async function discoverCommands(target: string): Promise<Command[]> {
   return Object.keys(await readPackage(target)).filter(s => /^(test|build|lint|typecheck|check)(:|$)/.test(s) && /^[a-zA-Z0-9:_-]+$/.test(s)).map(label => ({program:'npm',args:['run',label],label}));
@@ -28,7 +28,7 @@ export class Runner {
     this.active++;
     try {
       const revision = (await git(target,['rev-parse','HEAD'])).trim();
-      const changesHash = createHash('sha256').update(await changes(target,revision)).digest('hex');
+      const changesHash = await workingHash(target);
       const envFingerprint = await fingerprint(target,options.timeoutMs); const start = Date.now();
       if (options.signal?.aborted) throw new Error('Cancelled before launch');
       return await new Promise<Run>((resolve) => {
@@ -50,18 +50,21 @@ export class Runner {
         child.stdout.on('data',append); child.stderr.on('data',append);
         const kill = () => {
           if (!child.pid) return;
-          if (process.platform === 'win32') execFile('taskkill',['/pid',String(child.pid),'/t','/f'],{windowsHide:true},() => {});
+          if (process.platform === 'win32') execFile('taskkill',['/pid',String(child.pid),'/t','/f'],{windowsHide:true,timeout:5000},() => {});
           else { try { process.kill(-child.pid,'SIGKILL'); } catch { /* exited */ } }
         };
         const abort = () => { cancelled = true; kill(); };
         options.signal?.addEventListener('abort',abort,{once:true});
         const timer = setTimeout(() => { timedOut = true; kill(); },options.timeoutMs);
         child.on('error',e => { spawnError = e.message; });
-        child.on('close',code => {
+        child.on('close',async code => {
           clearTimeout(timer); options.signal?.removeEventListener('abort',abort);
           if (process.platform !== 'win32') kill();
+          let changedDuringRun = false;
+          try { changedDuringRun = await workingHash(target)!==changesHash || (await git(target,['rev-parse','HEAD'])).trim()!==revision; }
+          catch { changedDuringRun = true; }
           const state = cancelled ? 'CANCELLED' : timedOut || spawnError ? 'ERROR' : code === 0 ? 'PASSED' : code === null ? 'ERROR' : 'FAILED';
-          resolve({id:randomUUID(),earthId,command,started:new Date(start).toISOString(),ended:new Date().toISOString(),state,exitCode:code,output:output.toString('utf8'),truncated,durationMs:Date.now()-start,kind:options.kind??'check',batchId:options.batchId,repeatIndex:options.repeatIndex,repeatTotal:options.repeatTotal,queueScope:options.queueScope,concurrencyLimit:options.concurrencyLimit,queuedMs:options.queuedMs,fingerprint:envFingerprint,revision,changesHash,limitation:timedOut ? 'Timeout exceeded' : spawnError || 'Command exit status only; individual assertions and coverage are not inferred. Installed dependencies, tools and external services may differ. Changes hash excludes untracked contents. Elapsed time is not a benchmark; external processes and test workers can contend for resources.'});
+          resolve({id:randomUUID(),earthId,command,started:new Date(start).toISOString(),ended:new Date().toISOString(),state,exitCode:code,output:output.toString('utf8'),truncated,durationMs:Date.now()-start,changedDuringRun,kind:options.kind??'check',batchId:options.batchId,repeatIndex:options.repeatIndex,repeatTotal:options.repeatTotal,queueScope:options.queueScope,concurrencyLimit:options.concurrencyLimit,queuedMs:options.queuedMs,fingerprint:envFingerprint,revision,changesHash,limitation:timedOut ? 'Timeout exceeded' : spawnError || 'Command exit status only; individual assertions and coverage are not inferred. Installed dependencies, tools and external services may differ. Changes hash includes tracked and non-ignored untracked file contents; ignored files and external services are excluded. Elapsed time is not a benchmark; external processes and test workers can contend for resources.'});
         });
       });
     } finally { this.active--; }

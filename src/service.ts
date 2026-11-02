@@ -3,7 +3,8 @@ import path from 'node:path';
 import { lstat, mkdir, writeFile, readdir, readFile, unlink } from 'node:fs/promises';
 import { Experiment, Earth, name, validateCatalog, Run } from './domain';
 import { Store } from './store';
-import { git, repositoryRoot, resolveCommit, createWorktree, assertOwned, changes, noSymlinks, ownershipContext } from './git';
+import { git, repositoryRoot, resolveCommit, createWorktree, assertOwned, changes, noSymlinks, ownershipContext, snapshot, Snapshot, workingHash } from './git';
+import { compare, Freshness } from './comparison';
 import { earthDirectory } from './workspace';
 export class Service {
   readonly store: Store;
@@ -15,7 +16,7 @@ export class Service {
     await this.createEarth(experiment.id,'Baseline',true);
     return (await this.store.load()).experiments.find(e => e.id === experiment.id)!;
   }
-  async createEarth(experimentId: string, label: string, baseline = false): Promise<Earth> {
+  async createEarth(experimentId: string, label: string, baseline = false, contents?: Snapshot): Promise<Earth> {
     return this.store.transaction(async catalog => {
       const exp = catalog.experiments.find(e => e.id === experimentId); if (!exp) throw new Error('Experiment missing');
       if (exp.earths.length >= 100) throw new Error('Earth limit reached');
@@ -29,8 +30,53 @@ export class Service {
       const manifest = path.join(this.store.root,'manifests',id + '.json');
       await writeFile(manifest,JSON.stringify(earth),{flag:'wx'});
       await createWorktree(exp.repository,this.store.root,id,exp.baselineCommit,directory);
+      if (contents) await git(target,['read-tree','--reset','-u',contents.tree]);
       exp.earths.push(earth); return earth;
     });
+  }
+  async duplicateCurrent(earth: Earth, label: string): Promise<Earth> {
+    await this.owned(earth);
+    if (earth.baseline) throw new Error('Choose an alternative Earth');
+    const contents = await snapshot(earth.path);
+    return this.createEarth(earth.experimentId,label,false,contents);
+  }
+  async previewBringBack(earth: Earth): Promise<Snapshot & {preview: string}> {
+    await this.owned(earth);
+    if (earth.baseline) throw new Error('Choose an alternative Earth');
+    const contents = await snapshot(earth.path);
+    const preview = await git(earth.path,['diff','--no-ext-diff','--no-textconv','--stat',earth.sourceCommit,contents.tree,'--'])+
+      await git(earth.path,['diff','--no-ext-diff','--no-textconv',earth.sourceCommit,contents.tree,'--']);
+    return {...contents,preview};
+  }
+  async bringBack(earth: Earth, branch: string, approved: Snapshot): Promise<string> {
+    const exp = await this.owned(earth);
+    if (earth.baseline) throw new Error('Choose an alternative Earth');
+    await git(exp.repository,['check-ref-format','--branch',branch]);
+    if (branch.startsWith('-') || branch === 'HEAD' || branch.includes('@{-')) throw new Error('Invalid branch name');
+    const current = await snapshot(earth.path);
+    if (current.hash !== approved.hash || current.tree !== approved.tree || current.revision !== approved.revision) throw new Error('Earth changed after preview; preview again');
+    // commit-tree preserves the Earth history without touching either checkout or index.
+    const commit = (await git(earth.path,['-c','user.name=ParallelEarth','-c','user.email=parallel-earth@localhost',
+      'commit-tree',current.tree,'-p',current.revision,'-m','ParallelEarth: '+earth.name])).trim();
+    // An empty old value requires an absent ref; existing branches are never replaced.
+    await git(exp.repository,['update-ref','refs/heads/'+branch,commit,'']);
+    return commit;
+  }
+  async freshness(earth: Earth): Promise<Record<string,Freshness>> {
+    const result: Record<string,Freshness> = {};
+    if (!earth.runs.some(r=>r.kind!=='setup')) return result;
+    try {
+      await this.owned(earth);
+      const revision = await resolveCommit(earth.path,'HEAD'), hash = await workingHash(earth.path);
+      for (const run of earth.runs) result[run.id] = !run.changesHash.startsWith('files-v1:') ? 'UNKNOWN' :
+        run.changedDuringRun || run.revision !== revision || run.changesHash !== hash ? 'STALE' : 'CURRENT';
+    } catch { for (const run of earth.runs) result[run.id] = 'UNKNOWN'; }
+    return result;
+  }
+  async report(experiment: Experiment) {
+    const evidence: Record<string,Freshness> = {};
+    for (const earth of experiment.earths) Object.assign(evidence,await this.freshness(earth));
+    return compare(experiment,evidence);
   }
   async owned(earth: Earth): Promise<Experiment> {
     const exp = (await this.store.load()).experiments.find(e => e.id === earth.experimentId);
