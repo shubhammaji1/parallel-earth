@@ -1,3 +1,17 @@
+# 0.5.0
+
+- Added approved app previews in managed terminals, separate loopback ports, Vite strict-port mode and open/stop actions.
+- Recorded actual PATH Node/npm versions and selected configuration hashes; exposed environment differences in the dashboard, live command and exports.
+- Added a standalone CLI and versioned CI recipes with baseline/candidate worktrees, repeated checks, optional setup, test-mapped criteria, JSON/Markdown reports and explicit exit gates.
+- Environment fingerprints now include recorded tools and configuration. Rerun legacy comparisons for current evidence.
+
+# 0.4.0
+
+- Added a comparison dashboard with Earth summaries, setup state, evidence freshness, searchable individual test results and pagination.
+- Capture Jest-compatible JSON from stdout or a per-run PARALLEL_EARTH_REPORT file; compare regressions, improvements, skips, missing tests and unstable outcomes.
+- Added experiment acceptance criteria with editable test mappings and current-evidence verification states.
+- Markdown and JSON exports include individual outcomes and acceptance evidence. Existing catalogs remain compatible.
+
 # 0.3.0
 
 - Added previewed branch export with no source checkout/index changes and no existing-branch replacement.

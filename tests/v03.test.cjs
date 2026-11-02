@@ -64,6 +64,6 @@ test('a command that modifies files invalidates its own evidence even after file
  await service.record(earth,run);assert.equal((await service.freshness((await service.store.load()).experiments[0].earths[1]))[run.id],'STALE');
 }));
 test('release commands have matching handlers and context menus',async()=>{
- const pkg=JSON.parse(await fs.readFile('package.json','utf8')),code=await fs.readFile('src/extension.ts','utf8');assert.equal(pkg.version,'0.3.0');
+ const pkg=JSON.parse(await fs.readFile('package.json','utf8')),code=await fs.readFile('src/extension.ts','utf8');assert.equal(pkg.version,require('../package-lock.json').version);
  for(const command of ['bringChangesBack','duplicateEarth']){assert.ok(pkg.contributes.commands.some(c=>c.command==='parallelEarth.'+command));assert.ok(pkg.contributes.menus['view/item/context'].some(c=>c.command==='parallelEarth.'+command));assert.ok(code.includes('async '+command+'(item)'));}
 });

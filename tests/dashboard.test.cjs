@@ -2,21 +2,28 @@ const {test}=require('node:test'),assert=require('node:assert/strict'),vm=requir
 const fs=require('node:fs'),path=require('node:path'),{createRequire}=require('node:module');
 const file=path.resolve('dist/extension.js'),realRequire=createRequire(file);
 const disposable=()=>({dispose(){}});
-function host(visible=false,trusted=false){
+function host(visible=false,trusted=false,previewFixture=false){
  const views=[],panels=[],commands=new Map(),output=[],providers=new Map(),executed=[];
+ const terminals=[],terminalClosed=[],quickPicks=[],opened=[];
  const catalog={version:1,experiments:[]},freshnessOverrides=new Map();
  const base=realRequire('./index');
  const core={...base,Store:class{constructor(root){this.root=root;}async load(){return catalog;}},
-  Service:class extends base.Service{async freshness(earth){return freshnessOverrides.has(earth.id)?Object.fromEntries(earth.runs.map(r=>[r.id,freshnessOverrides.get(earth.id)])):super.freshness(earth);}}};
+  Service:class extends base.Service{async owned(earth){if(previewFixture)return catalog.experiments.find(e=>e.id===earth.experimentId);return super.owned(earth);}async freshness(earth){return freshnessOverrides.has(earth.id)?Object.fromEntries(earth.runs.map(r=>[r.id,freshnessOverrides.get(earth.id)])):super.freshness(earth);}}};
  const uri=fsPath=>({fsPath});
  const vscode={
   TreeItem:class{constructor(label,collapsibleState){this.label=label;this.collapsibleState=collapsibleState;}},TreeItemCollapsibleState:{None:0,Collapsed:1,Expanded:2},ThemeIcon:class{constructor(id,color){this.id=id;this.color=color;}},ThemeColor:class{constructor(id){this.id=id;}},
   ExtensionMode:{Production:1,Development:2,Test:3},ViewColumn:{One:1},StatusBarAlignment:{Left:1},
   EventEmitter:class{constructor(){this.event=()=>disposable();}fire(){}dispose(){}},
-  Uri:{file:uri,joinPath:(base,...parts)=>uri(path.join(base.fsPath,...parts))},
+  Uri:{file:uri,parse:value=>({toString:()=>value}),joinPath:(base,...parts)=>uri(path.join(base.fsPath,...parts))},
+  env:{openExternal:async value=>{opened.push(value.toString());return true;}},
   workspace:{isTrusted:trusted,getConfiguration:()=>({get:(_key,fallback)=>fallback}),onDidGrantWorkspaceTrust:disposable,onDidChangeConfiguration:disposable},
   commands:{registerCommand:(name,handler)=>{commands.set(name,handler);return disposable();},executeCommand:async name=>{executed.push(name);return commands.get(name)?.();}},
   window:{
+   onDidCloseTerminal:fn=>{terminalClosed.push(fn);return disposable();},
+   createTerminal:options=>{const terminal={options,show(){},dispose(){terminal.disposed=true;for(const fn of terminalClosed)fn(terminal);}};terminals.push(terminal);return terminal;},
+   showQuickPick:async choices=>{const index=quickPicks.shift()??0;return choices[index];},
+   showWarningMessage:async(_message,_options,button)=>button,
+   showInformationMessage:async()=>undefined,
    createOutputChannel:()=>({appendLine:line=>output.push(line),dispose(){}}),
    createStatusBarItem:()=>({show(){},dispose(){}}),
    registerWebviewViewProvider:(id,provider)=>{providers.set(id,provider);return disposable();},
@@ -38,9 +45,28 @@ function host(visible=false,trusted=false){
  const module={exports:{}};
  vm.runInNewContext(fs.readFileSync(file,'utf8'),{require:id=>id==='vscode'?vscode:id==='./index'?core:realRequire(id),exports:module.exports,module,console});
  const context={subscriptions:[],extensionMode:vscode.ExtensionMode.Production,globalStorageUri:uri(path.resolve('artifacts/dashboard-test-storage')),extensionUri:uri(process.cwd()),extension:{packageJSON:{version:'0.1.1'}}};
- return {...module.exports,context,views,panels,commands,output,providers,catalog,executed,freshnessOverrides};
+ return {...module.exports,context,views,panels,commands,output,providers,catalog,executed,freshnessOverrides,terminals,quickPicks,opened};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
+
+test('preview commands launch separate terminal ports, open only their URLs and dispose on stop/close',async()=>{
+ const fsp=require('node:fs/promises'),{randomUUID}=require('node:crypto');
+ const parent=path.resolve('artifacts/test-fixtures');await fsp.mkdir(parent,{recursive:true});const root=await fsp.mkdtemp(path.join(parent,'preview-host-'));
+ const h=host(false,true,true);
+ try{
+  await fsp.writeFile(path.join(root,'package.json'),JSON.stringify({scripts:{dev:'node server.cjs'}}));
+  await h.activate(h.context);const id=randomUUID(),earths=[0,1].map(i=>({id:randomUUID(),experimentId:id,name:'App '+i,path:root,archived:false,baseline:i===0,runs:[]}));
+  h.catalog.experiments.push({id,name:'Preview',repository:root,earths});
+  for(const earth of earths)await h.commands.get('parallelEarth.startPreview')({experimentId:id,earthId:earth.id});
+  assert.equal(h.terminals.length,2);assert.notEqual(h.terminals[0].options.env.PORT,h.terminals[1].options.env.PORT);
+  assert.equal(h.terminals[0].options.env.HOST,'127.0.0.1');assert.equal(h.terminals[0].options.isTransient,true);
+  await h.commands.get('parallelEarth.openPreview')({experimentId:id,earthId:earths[0].id});assert.equal(h.opened[0],'http://127.0.0.1:'+h.terminals[0].options.env.PORT);
+  await h.commands.get('parallelEarth.stopPreview')({experimentId:id,earthId:earths[0].id});assert.equal(h.terminals[0].disposed,true);
+  h.terminals[1].dispose();await assert.rejects(h.commands.get('parallelEarth.openPreview')({experimentId:id,earthId:earths[1].id}),/Start a preview/);
+ }finally{
+  for(const subscription of h.context.subscriptions)subscription.dispose();assert.equal(path.dirname(root),parent);assert.ok(path.basename(root).startsWith('preview-host-'));await fsp.rm(root,{recursive:true,force:true});
+ }
+});
 test('installed extension opens Home when the sidebar becomes visible, without duplicate dashboards',async()=>{
  const h=host();await h.activate(h.context);
  assert.equal(h.panels.length,0,'Do not interrupt unrelated editor startup');

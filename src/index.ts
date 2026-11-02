@@ -13,3 +13,7 @@ export * from './history';
 export * from './home';
 
 export * from './queue';
+export * from './test-results';
+export * from './comparison-view';
+export * from './environment';
+export * from './preview';

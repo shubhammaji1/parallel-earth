@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { lstat, mkdir, writeFile, readdir, readFile, unlink } from 'node:fs/promises';
-import { Experiment, Earth, name, validateCatalog, Run } from './domain';
+import { Experiment, Earth, name, validateCatalog, Run, Criterion, validateCriterion } from './domain';
 import { Store } from './store';
 import { git, repositoryRoot, resolveCommit, createWorktree, assertOwned, changes, noSymlinks, ownershipContext, snapshot, Snapshot, workingHash } from './git';
 import { compare, Freshness } from './comparison';
@@ -76,7 +76,30 @@ export class Service {
   async report(experiment: Experiment) {
     const evidence: Record<string,Freshness> = {};
     for (const earth of experiment.earths) Object.assign(evidence,await this.freshness(earth));
-    return compare(experiment,evidence);
+    const report=compare(experiment,evidence);
+    for(const row of report.earths)try {
+      const earth=experiment.earths.find(e=>e.id===row.id)!;await this.owned(earth);
+      const tracked=await git(earth.path,['diff','--no-ext-diff','--no-textconv','--name-only','-z',experiment.baselineCommit,'--']);
+      const untracked=await git(earth.path,['ls-files','--others','--exclude-standard','-z']);
+      row.changedFiles=new Set((tracked+untracked).split('\0').filter(Boolean)).size;
+    } catch { row.changedFiles=null; }
+    return report;
+  }
+  async saveCriterion(experimentId:string,criterion:Criterion):Promise<void> {
+    validateCriterion(criterion);
+    await this.store.transaction(async catalog=>{
+      const exp=catalog.experiments.find(e=>e.id===experimentId);if(!exp)throw new Error('Experiment missing');
+      const criteria=exp.criteria??=[];
+      const index=criteria.findIndex(c=>c.id===criterion.id);
+      if(index<0){if(criteria.length>=100)throw new Error('Criterion limit reached');criteria.push(criterion);}
+      else criteria[index]=criterion;
+    });
+  }
+  async removeCriterion(experimentId:string,criterionId:string):Promise<void> {
+    await this.store.transaction(async catalog=>{
+      const exp=catalog.experiments.find(e=>e.id===experimentId);if(!exp)throw new Error('Experiment missing');
+      exp.criteria=(exp.criteria??[]).filter(c=>c.id!==criterionId);
+    });
   }
   async owned(earth: Earth): Promise<Experiment> {
     const exp = (await this.store.load()).experiments.find(e => e.id === earth.experimentId);

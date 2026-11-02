@@ -1,8 +1,9 @@
 import { sidebarMarkup, parseSidebarMessage } from './sidebar';
+import { reservePreviewPort, previewLaunch, captureEnvironment, environmentDifferences } from './index';
 import * as vscode from 'vscode';
 import path from 'node:path';
 import { readFile, writeFile, mkdir, unlink } from 'node:fs/promises';
-import { Store, Service, Runner, ExecutionQueue, QueueState, RunKind, fingerprint, validateCommand, Earth, Experiment, Command, git, repositoryRoot, readPackage, discoverCommands, applyPatch, compare, checkSeries, markdown } from './index';
+import { Store, Service, Runner, ExecutionQueue, QueueState, RunKind, fingerprint, validateCommand, Earth, Experiment, Command, git, repositoryRoot, readPackage, discoverCommands, applyPatch, checkSeries, markdown, comparisonMarkup, parseComparisonMessage } from './index';
 
 import { earthWorkspace } from './workspace';
 import { projectHistory, projectSummaries } from './history';
@@ -24,8 +25,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const controllers = new Set<AbortController>();
   const running = new Set<string>();
   const deleting = new Set<string>();
+  const previews=new Map<string,{terminal:vscode.Terminal;url:string;port:number;earth:Earth}>();
+  const startingPreviews=new Set<string>();
+  context.subscriptions.push({dispose:()=>{for(const preview of previews.values())preview.terminal.dispose();previews.clear();}},
+    vscode.window.onDidCloseTerminal(terminal=>{for(const [id,preview]of previews)if(preview.terminal===terminal){previews.delete(id);change.fire(undefined);}}));
   let activeExperimentId:string|undefined;
   let homePanel:vscode.WebviewPanel|undefined;
+  const comparisonPanels=new Map<string,{panel:vscode.WebviewPanel;selectedId?:string;version:number}>();
   let sidebarView:vscode.WebviewView|undefined;
   let sidebarSnapshot="";
   let homeVersion=0;
@@ -77,7 +83,35 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     change.fire(undefined);
     void renderHome().catch(error=>output.appendLine(String(error)));
     void renderSidebar().catch(error=>output.appendLine(String(error)));
+    for(const id of comparisonPanels.keys())void renderComparison(id).catch(error=>output.appendLine(String(error)));
   };
+  async function renderComparison(id:string):Promise<void>{
+    const view=comparisonPanels.get(id);if(!view)return;const version=++view.version;
+    const exp=(await service.store.load()).experiments.find(e=>e.id===id);
+    if(!exp||!vscode.workspace.isTrusted){view.panel.dispose();return;}
+    const report=await service.report(exp);
+    if(comparisonPanels.get(id)!==view||version!==view.version)return;
+    view.panel.webview.html=comparisonMarkup(report,view.selectedId,view.panel.webview.cspSource,randomUUID());
+  }
+  async function showComparison(exp:Experiment):Promise<void>{
+    const existing=comparisonPanels.get(exp.id);if(existing){existing.panel.reveal(vscode.ViewColumn.One);await renderComparison(exp.id);return;}
+    const panel=vscode.window.createWebviewPanel('parallelEarth.comparison','Compare: '+exp.name,vscode.ViewColumn.One,{enableScripts:true,retainContextWhenHidden:true,localResourceRoots:[]});
+    const view={panel,selectedId:undefined as string|undefined,version:0};comparisonPanels.set(exp.id,view);
+    context.subscriptions.push(panel,panel.onDidDispose(()=>{if(comparisonPanels.get(exp.id)===view)comparisonPanels.delete(exp.id);}),panel.webview.onDidReceiveMessage(async value=>{
+      try {
+        trusted();const message=parseComparisonMessage(value);if(!message)return;
+        if(message.action==='refresh'){await renderComparison(exp.id);return;}
+        if(message.action==='criteria'){await vscode.commands.executeCommand('parallelEarth.manageCriteria',{experimentId:exp.id});return;}
+        if('earthId' in message){
+          const current=(await service.store.load()).experiments.find(e=>e.id===exp.id);
+          if(!current?.earths.some(e=>e.id===message.earthId))return;
+          if(message.action==='select'){view.selectedId=message.earthId;await renderComparison(exp.id);}
+          else await vscode.commands.executeCommand('parallelEarth.runChecks',{experimentId:exp.id,earthId:message.earthId});
+        }
+      }catch(error){output.appendLine(String(error));await vscode.window.showErrorMessage('ParallelEarth: '+String(error));}
+    }));
+    await renderComparison(exp.id);
+  }
   async function showExplorer(): Promise<void> {
     refresh();
     await vscode.commands.executeCommand('workbench.view.extension.parallelEarth');
@@ -169,7 +203,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             item.iconPath=new vscode.ThemeIcon(icon,new vscode.ThemeColor(color));return item;
           })),
           action('Create Earth','createEarth',parent),action('Compare evidence','compareEarths',parent),
-          action('Export report','exportReport',parent),action('Repeat checks (baseline + alternatives)','repeatChecks',parent)
+          action('Export report','exportReport',parent),action('Acceptance criteria','manageCriteria',parent),action('Repeat checks (baseline + alternatives)','repeatChecks',parent)
         ];
         return [];
       }catch(e){output.appendLine(String(e));return[action('Catalog unavailable - Show Diagnostics','showDiagnostics',{})];}
@@ -259,6 +293,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const timeoutMs=cfg().get<number>('timeoutSeconds',120)*1000,maxBytes=cfg().get<number>('maxLogBytes',262144);
     const approvals=new Map<string,string>();const descriptions:string[]=[];
     for(const selected of earths){
+      if(previews.has(selected.id)||startingPreviews.has(selected.id))throw Error('Stop the app preview before running checks or setup: '+selected.name);
       await service.owned(selected);
       if(selected.archived||running.has(selected.id))throw new Error('Earth is archived or already queued/running: '+selected.name);
       approvals.set(selected.id,await fingerprint(selected.path,timeoutMs));
@@ -322,6 +357,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const target=selected;
       if(deleting.has(target.id))return;
       if(target.earths.some(e=>running.has(e.id)))throw new Error('Wait until this experiment finishes running.');
+      if(target.earths.some(e=>previews.has(e.id)||startingPreviews.has(e.id)))throw Error('Stop app previews before deleting this experiment.');
       deleting.add(target.id);
       const feedback=(message:string,busy=true)=>{void homePanel?.webview.postMessage({type:'deletion',experimentId:target.id,busy,message});};
       let result='Deletion cancelled.';
@@ -446,9 +482,81 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       const count=await vscode.window.showQuickPick(['3','5','10','2'],{placeHolder:'Runs per Earth (sequential). Every result is retained; this is not a benchmark.'});if(!count)return;
       const command=await chooseCheck(baseline);if(command)await executePlan([baseline,...picked.map(p=>p.earth)],command,'check',Number(count));
     },
+    async startPreview(item) {
+      trusted();const selected=await earth(item);if(!selected)return;await service.owned(selected);
+      if(selected.archived||running.has(selected.id)||startingPreviews.has(selected.id))throw Error('Earth is archived or busy.');
+      const existing=previews.get(selected.id);if(existing){existing.terminal.show();return;}
+      startingPreviews.add(selected.id);
+      try {
+        const scripts=await readPackage(selected.path);
+        const script=await vscode.window.showQuickPick(Object.keys(scripts).filter(s=>/^(dev|start|serve)(:|$)/.test(s)&&/^[a-zA-Z0-9_][a-zA-Z0-9:_-]*$/.test(s)),{placeHolder:'Choose the app preview npm script (install dependencies first)'});if(!script)return;
+        const mode=await vscode.window.showQuickPick([{label:'PORT / HOST environment',value:'port' as const},{label:'Vite: explicit loopback, port and strictPort',value:'vite' as const}],{placeHolder:'How does this script select its listening port?'});if(!mode)return;
+        if(await vscode.window.showWarningMessage('Start '+selected.name+'?\n'+selected.path+'\nnpm run '+script+'\nScript: '+scripts[script]+'\nPreview processes can access files and network. Worktrees may share databases, APIs and credentials. Use separate test services and data. PORT/HOST mode requires the script to respect these variables; Vite mode supplies explicit flags.',{modal:true},'Start Preview')!=='Start Preview')return;
+        trusted();await service.owned(selected);
+        if((await readPackage(selected.path))[script]!==scripts[script])throw Error('Script changed after approval; start again.');
+        const lease=await reservePreviewPort(new Set([...previews.values()].map(p=>p.port)));
+        let released=false;
+        try {
+          const launch=previewLaunch(script,lease.port,mode.value);
+          await lease.release();released=true;
+          const terminal=vscode.window.createTerminal({name:'Earth: '+selected.name+' ('+lease.port+')',cwd:selected.path,...launch,isTransient:true});
+          previews.set(selected.id,{terminal,url:lease.url,port:lease.port,earth:selected});context.subscriptions.push(terminal);
+          terminal.show();
+          await vscode.window.showInformationMessage('Preview launched at '+lease.url+'. Check the terminal for readiness or port errors. Use Open App Preview when ready.');
+        }finally{if(!released)await lease.release();}
+      }finally{startingPreviews.delete(selected.id);}
+    },
+    async openPreview(item) {
+      trusted();const selected=await earth(item);if(!selected)return;const preview=previews.get(selected.id);
+      if(!preview)throw Error('Start a preview for this Earth first.');
+      await vscode.env.openExternal(vscode.Uri.parse(preview.url));
+    },
+    async stopPreview(item) {
+      trusted();const selected=await earth(item);if(!selected)return;const preview=previews.get(selected.id);
+      if(!preview)return;preview.terminal.dispose();previews.delete(selected.id);
+    },
+    async compareEnvironment(item) {
+      trusted();const exp=await experiment(item);if(!exp)return;
+      const baseline=exp.earths.find(e=>e.baseline);if(!baseline)throw Error('Baseline missing');
+      await service.owned(baseline);const base=await captureEnvironment(baseline.path);
+      const rows=[];
+      for(const selected of exp.earths){await service.owned(selected);const current=await captureEnvironment(selected.path);rows.push({earth:selected.name,environment:current,differences:environmentDifferences(base,current)});}
+      await text(JSON.stringify({note:'Live tools and file hashes. Check-process overrides: CI=true, FORCE_COLOR=0. No installed dependency tree or service isolation is verified; raw configuration and secrets are not exported.',earths:rows},null,2),'json');
+    },
     async compareEarths(item) {
       trusted();const exp=await experiment(item);if(!exp)return;
-      await text(markdown(await service.report(exp)));
+      await showComparison(exp);
+    },
+    async manageCriteria(item) {
+      trusted();const exp=await experiment(item);if(!exp)return;
+      const criteria=exp.criteria??[];
+      const choice=await vscode.window.showQuickPick([
+        {label:'Add acceptance criterion',id:'add'},
+        ...criteria.map(c=>({label:c.label,description:c.testIds.length+' mapped tests · Edit',id:c.id})),
+        ...(criteria.length?[{label:'Remove acceptance criterion',id:'remove'}]:[])
+      ],{placeHolder:'Define requirements and map them to recorded tests'});if(!choice)return;
+      if(choice.id==='remove'){
+        const pick=await vscode.window.showQuickPick(criteria.map(c=>({label:c.label,id:c.id})),{placeHolder:'Choose criterion to remove'});if(!pick)return;
+        if(await vscode.window.showWarningMessage('Remove criterion "'+pick.label+'"?',{modal:true},'Remove')==='Remove')await service.removeCriterion(exp.id,pick.id);
+        return;
+      }
+      const existing=criteria.find(c=>c.id===choice.id);
+      const label=await vscode.window.showInputBox({prompt:'What must this implementation achieve? (maximum 100 characters)',value:existing?.label??''});if(!label)return;
+      const commands=new Map<string,Command>();
+      for(const earth of exp.earths)for(const run of earth.runs)if(run.kind!=='setup'&&run.testReport?.complete)commands.set(JSON.stringify([run.command.program,run.command.args]),run.command);
+      const check=await vscode.window.showQuickPick([
+        {label:'Leave unmapped',description:'Saved as UNVERIFIED until tests are linked',key:''},
+        ...[...commands].map(([key,command])=>({label:command.label,description:command.program+' '+command.args.join(' '),key}))
+      ],{placeHolder:'Choose the recorded check that exercises this requirement'});if(!check)return;
+      const command=commands.get(check.key);let testIds:string[]=[];
+      if(command){
+        const tests=new Map<string,{label:string;description:string;id:string;picked:boolean}>();
+        for(const earth of exp.earths)for(const run of earth.runs)if(run.testReport?.complete&&JSON.stringify([run.command.program,run.command.args])===check.key)
+          for(const test of run.testReport.tests)tests.set(test.id,{label:test.name,description:test.file,id:test.id,picked:existing?.testIds.includes(test.id)??false});
+        const selected=await vscode.window.showQuickPick([...tests.values()],{canPickMany:true,placeHolder:'Every mapped test must pass; skipped or missing tests cannot verify this criterion'});if(!selected)return;
+        testIds=selected.map(t=>t.id);
+      }
+      trusted();await service.saveCriterion(exp.id,{id:existing?.id??randomUUID(),label,testIds,command});
     },
     async exportReport(item) {
       trusted();const exp=await experiment(item);if(!exp)return;
@@ -462,11 +570,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     async archiveEarth(item) {
       trusted();const selected=await earth(item,false);if(!selected)return;
       if(running.has(selected.id))throw new Error('Wait until this Earth finishes running.');
+      if(previews.has(selected.id)||startingPreviews.has(selected.id))throw Error('Stop the app preview before archiving this Earth.');
       await service.update(selected,{archived:!selected.archived});
     },
     async deleteEarth(item) {
       trusted();const selected=await earth(item,false);if(!selected)return;
       if(running.has(selected.id))throw new Error('Wait until this Earth finishes running.');
+      if(previews.has(selected.id)||startingPreviews.has(selected.id))throw Error('Stop the app preview before deleting this Earth.');
       if(await vscode.window.showWarningMessage('Remove '+selected.name+' at '+selected.path+'? Deletion is refused when files or commits need preservation.',{modal:true},'Delete Earth')==='Delete Earth')await service.remove(selected,true);
     },
     async recover() {trusted();await text('# Recovery\n\n'+(await service.recover()).join('\n\n'));},

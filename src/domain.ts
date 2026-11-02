@@ -1,8 +1,13 @@
 import { randomUUID } from 'node:crypto';
+import { EnvironmentSnapshot, validateEnvironment } from './environment';
 
 export type State = 'PASSED' | 'FAILED' | 'INCONCLUSIVE' | 'NOT_RUN' | 'ERROR' | 'CANCELLED';
 export interface Command { program: 'node' | 'npm'; args: string[]; label: string }
 export type RunKind = 'check' | 'setup';
+export type TestState = 'PASSED' | 'FAILED' | 'SKIPPED' | 'TODO';
+export interface TestResult { id: string; file: string; name: string; state: TestState; durationMs?: number; message?: string }
+export interface TestReport { format: 'jest-compatible-json'; complete: boolean; tests: TestResult[]; issue?: string }
+export interface Criterion { id: string; label: string; testIds: string[]; command?: Command }
 export interface Run {
   id: string; earthId: string; command: Command; started: string; ended: string;
   state: State; exitCode: number | null; output: string; truncated: boolean;
@@ -10,12 +15,14 @@ export interface Run {
   queueScope?: string; concurrencyLimit?: number; queuedMs?: number;
   durationMs: number; fingerprint: string; revision: string; changesHash: string; limitation: string;
   changedDuringRun?: boolean;
+  testReport?: TestReport;
+  environment?: EnvironmentSnapshot;
 }
 export interface Earth {
   id: string; experimentId: string; name: string; sourceCommit: string; path: string;
   created: string; archived: boolean; baseline: boolean; runs: Run[];
 }
-export interface Experiment { id: string; name: string; repository: string; baselineCommit: string; created: string; earths: Earth[] }
+export interface Experiment { id: string; name: string; repository: string; baselineCommit: string; created: string; earths: Earth[]; criteria?: Criterion[] }
 export interface Catalog { version: 1; experiments: Experiment[] }
 export const uuid = randomUUID;
 export function name(value: string): string {
@@ -33,6 +40,26 @@ function id(value: unknown): asserts value is string {
 }
 function commit(value: unknown): void { if (typeof value !== 'string' || !/^[0-9a-f]{40,64}$/.test(value)) throw new Error('Invalid commit'); }
 function date(value: unknown): void { if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) throw new Error('Invalid timestamp'); }
+export function validateCriterion(value: Criterion): void {
+  object(value); id(value.id); text(value.label,100); name(value.label);
+  if (!Array.isArray(value.testIds) || value.testIds.length>100 || new Set(value.testIds).size!==value.testIds.length || value.testIds.some(v=>typeof v!=='string'||!/^[a-f0-9]{64}$/.test(v))) throw new Error('Invalid criterion tests');
+  if (value.command!==undefined) validateCommand(value.command);
+  if (value.testIds.length && !value.command) throw new Error('Mapped tests require a check command');
+}
+export function validateTestReport(value: unknown): asserts value is TestReport {
+  object(value);
+  if (value.format!=='jest-compatible-json' || typeof value.complete!=='boolean' || !Array.isArray(value.tests) || value.tests.length>1000) throw new Error('Invalid structured test report');
+  if (value.issue!==undefined) text(value.issue,1000);
+  const seen=new Set<string>();
+  for (const test of value.tests) {
+    object(test); text(test.file,1000); text(test.name,2000); text(test.id,64); text(test.state,20);
+    if (!/^[a-f0-9]{64}$/.test(test.id) || seen.has(test.id) || !['PASSED','FAILED','SKIPPED','TODO'].includes(test.state)) throw new Error('Invalid individual test');
+    seen.add(test.id);
+    if (test.durationMs!==undefined && (typeof test.durationMs!=='number'||!Number.isFinite(test.durationMs)||test.durationMs<0)) throw new Error('Invalid test duration');
+    if (test.message!==undefined) text(test.message,4000);
+  }
+  if (value.complete && (!value.tests.length || value.issue)) throw new Error('Complete report requires tests and no issue');
+}
 export function validateCommand(value: Command, kind: RunKind = 'check'): Command {
   object(value); text(value.label, 100);
   if (!Array.isArray(value.args) || !value.args.every(a => typeof a === 'string')) throw new Error('Invalid command arguments');
@@ -51,6 +78,11 @@ export function validateCatalog(value: unknown): Catalog {
   for (const exp of value.experiments) {
     object(exp); id(exp.id); text(exp.name, 100); name(exp.name); text(exp.repository); commit(exp.baselineCommit); date(exp.created);
     if (seen.has(exp.id)) throw new Error('Duplicate ID'); seen.add(exp.id);
+    if (exp.criteria!==undefined) {
+      if (!Array.isArray(exp.criteria)||exp.criteria.length>100) throw new Error('Invalid criteria collection');
+      const ids=new Set<string>();
+      for (const criterion of exp.criteria) { validateCriterion(criterion); if(ids.has(criterion.id))throw new Error('Duplicate criterion');ids.add(criterion.id); }
+    }
     if (!Array.isArray(exp.earths) || exp.earths.length > 100) throw new Error('Invalid Earth collection');
     for (const earth of exp.earths) {
       object(earth); id(earth.id); id(earth.experimentId); text(earth.name, 100); name(earth.name); text(earth.path); commit(earth.sourceCommit); date(earth.created);
@@ -62,6 +94,8 @@ export function validateCatalog(value: unknown): Catalog {
         if (run.earthId !== earth.id || !['PASSED','FAILED','INCONCLUSIVE','NOT_RUN','ERROR','CANCELLED'].includes(String(run.state)) || typeof run.truncated !== 'boolean' || typeof run.durationMs !== 'number' || !Number.isFinite(run.durationMs) || run.durationMs < 0 || !(run.exitCode === null || Number.isInteger(run.exitCode))) throw new Error('Invalid execution evidence');
         if (run.kind !== undefined && !['check','setup'].includes(String(run.kind))) throw new Error('Invalid run kind');
         if (run.changedDuringRun !== undefined && typeof run.changedDuringRun !== 'boolean') throw new Error('Invalid evidence change flag');
+        if (run.testReport!==undefined) validateTestReport(run.testReport);
+        if (run.environment!==undefined) validateEnvironment(run.environment);
         if (run.batchId !== undefined) id(run.batchId);
         if (run.repeatTotal !== undefined && (!Number.isInteger(run.repeatTotal) || Number(run.repeatTotal) < 1 || Number(run.repeatTotal) > 10)) throw new Error('Invalid repeat count');
         if (run.repeatIndex !== undefined && (!Number.isInteger(run.repeatIndex) || Number(run.repeatIndex) < 1 || Number(run.repeatIndex) > Number(run.repeatTotal))) throw new Error('Invalid repeat index');

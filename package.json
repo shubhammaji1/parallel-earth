@@ -2,7 +2,7 @@
   "name": "parallel-earth",
   "displayName": "ParallelEarth",
   "description": "Explore alternate futures. Verify before you change. Local worktree experiments with real check evidence.",
-  "version": "0.3.0",
+  "version": "0.5.0",
   "publisher": "shubhammaji1",
   "license": "MIT",
   "engines": {
@@ -97,7 +97,7 @@
       },
       {
         "command": "parallelEarth.compareEarths",
-        "title": "ParallelEarth: Compare Earths",
+        "title": "ParallelEarth: Comparison Dashboard",
         "icon": "$(git-compare)"
       },
       {
@@ -177,6 +177,31 @@
         "command": "parallelEarth.bringChangesBack",
         "title": "ParallelEarth: Bring Changes Back",
         "icon": "$(git-branch)"
+      },
+      {
+        "command": "parallelEarth.manageCriteria",
+        "title": "ParallelEarth: Manage Acceptance Criteria",
+        "icon": "$(checklist)"
+      },
+      {
+        "command": "parallelEarth.startPreview",
+        "title": "ParallelEarth: Start App Preview",
+        "icon": "$(play)"
+      },
+      {
+        "command": "parallelEarth.openPreview",
+        "title": "ParallelEarth: Open App Preview",
+        "icon": "$(browser)"
+      },
+      {
+        "command": "parallelEarth.stopPreview",
+        "title": "ParallelEarth: Stop App Preview",
+        "icon": "$(debug-stop)"
+      },
+      {
+        "command": "parallelEarth.compareEnvironment",
+        "title": "ParallelEarth: Compare Environments",
+        "icon": "$(server-environment)"
       }
     ],
     "viewsContainers": {
@@ -328,6 +353,31 @@
           "command": "parallelEarth.bringChangesBack",
           "when": "viewItem == parallelEarth.earth",
           "group": "edit@4"
+        },
+        {
+          "command": "parallelEarth.manageCriteria",
+          "when": "viewItem == parallelEarth.experiment",
+          "group": "evidence@27"
+        },
+        {
+          "command": "parallelEarth.startPreview",
+          "when": "viewItem == parallelEarth.earth || viewItem == parallelEarth.baseline",
+          "group": "preview@startPreview"
+        },
+        {
+          "command": "parallelEarth.openPreview",
+          "when": "viewItem == parallelEarth.earth || viewItem == parallelEarth.baseline",
+          "group": "preview@openPreview"
+        },
+        {
+          "command": "parallelEarth.stopPreview",
+          "when": "viewItem == parallelEarth.earth || viewItem == parallelEarth.baseline",
+          "group": "preview@stopPreview"
+        },
+        {
+          "command": "parallelEarth.compareEnvironment",
+          "when": "viewItem == parallelEarth.experiment",
+          "group": "preview@compareEnvironment"
         }
       ]
     },
@@ -382,5 +432,8 @@
   "homepage": "https://github.com/shubhammaji1/parallel-earth#readme",
   "bugs": {
     "url": "https://github.com/shubhammaji1/parallel-earth/issues"
+  },
+  "bin": {
+    "parallel-earth": "dist/cli.js"
   }
 }

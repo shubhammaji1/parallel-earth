@@ -248,3 +248,38 @@ An interrupted host may leave `execution-queue/active` beneath your storage root
 - **Stale evidence:** the explorer refreshes freshness while visible (approximately every 15 seconds), and comparison/export rechecks file contents and HEAD. Changed code or baseline evidence is labelled STALE and is not comparable. Legacy records show UNKNOWN until rerun. A command that changes files also invalidates its evidence. Raw command outcomes remain available in reports.
 
 Freshness hashes include tracked and non-ignored untracked files. Ignored files, installed dependencies and external service state are outside this check. Hashes do not prove that files stayed unchanged at every instant during a command. Symlinks and submodules are refused by snapshot/freshness inspection. Git clean/checkout filters may run during snapshot/copy operations in a trusted repository. Review new files for secrets before branch creation. A branch snapshot contains the working file state, not an independent copy of staged-only content. Snapshot objects can remain in Git even if branch creation is cancelled; normal Git maintenance manages unreachable objects.
+## New in 0.5.0
+
+- **App previews:** right-click an Earth to start, open or stop its app in a managed terminal. Each preview gets a separate local port; choose PORT/HOST mode or Vite strict-port mode. Configure separate test databases/services when needed.
+- **Environment comparison:** compare current tools/configuration across Earths, and inspect the Node/npm versions and configuration hashes recorded with checks in the dashboard and exports.
+- **CLI and CI:** run saved experiment recipes outside VS Code with repeat counts, optional dependency setup, acceptance criteria and JSON/Markdown reports. CI returns a failing exit code when the candidate lacks passing, current, comparable evidence.
+
+```sh
+npm run build
+node dist/cli.js --help
+node dist/cli.js ci --repo . --storage ../earth-ci --baseline HEAD~1 --candidate HEAD --script test:json --repeat 2 --approve --output ../earth-report.json
+```
+
+See [CLI, CI recipes, app previews and environment details](docs/cli-ci.md) for setup, exit codes, a GitHub Actions example and evidence limits.
+
+## New in 0.4.0
+
+Open **ParallelEarth: Comparison Dashboard** to compare baseline and alternative Earths, including changed-file counts, setup, check status and evidence freshness. Select an Earth to search or filter individual results, inspect failure output, and review acceptance criteria.
+
+For individual results, add an npm script using a Jest-compatible JSON reporter, for example:
+
+```json
+{
+  "scripts": {
+    "test:json": "vitest run --reporter=json"
+  }
+}
+```
+
+Jest users can use `jest --runInBand --json`. Select the script through **Run Checks** and approve it as usual. ParallelEarth captures JSON stdout separately from stderr. Report stdout must contain one complete JSON document. Ordinary scripts still provide command-level evidence.
+
+For noisy scripts, configure the reporter output file using the `PARALLEL_EARTH_REPORT` environment variable supplied for each run (for example, `vitest run --reporter=json --outputFile="$PARALLEL_EARTH_REPORT"` in a POSIX script). Use your shell's environment-variable syntax on Windows. The path is temporary and unique to that run; existing report files are never imported. Limits are 1,000 tests and the configured output byte limit. Incomplete, interrupted, duplicate or unsupported reports cannot verify criteria.
+
+Use **ParallelEarth: Manage Acceptance Criteria** to add a requirement, select a recorded check command, and map its tests. Requirements may be saved before running tests and remain **UNVERIFIED** until mapped. Every mapped test must pass in a complete, current check series for **VERIFIED**. Missing/skipped tests, failed commands, unknown freshness or incomplete repeats prevent verification. Failed tests show **FAILED**, varying mapped results show **UNSTABLE**, and changed code shows **STALE**. Criteria describe evidence from the tests you select; passing tests do not prove that the requirement is fully covered.
+
+Run the same check in the baseline and alternatives to compare individual regressions, recoveries, added/missing tests and skipped tests. Refresh evidence after editing files. JSON and Markdown exports retain test and criterion results.
