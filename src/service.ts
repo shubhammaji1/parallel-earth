@@ -3,9 +3,12 @@ import path from 'node:path';
 import { lstat, mkdir, writeFile, readdir, readFile, unlink } from 'node:fs/promises';
 import { Experiment, Earth, name, validateCatalog, Run, Criterion, validateCriterion } from './domain';
 import { Store } from './store';
-import { git, repositoryRoot, resolveCommit, createWorktree, assertOwned, changes, noSymlinks, ownershipContext, snapshot, Snapshot, workingHash } from './git';
+import { git, repositoryRoot, resolveCommit, createWorktree, assertOwned, changes, noSymlinks, ownershipContext, snapshot, Snapshot, workingHash, contained } from './git';
 import { compare, Freshness } from './comparison';
 import { earthDirectory } from './workspace';
+import { createHash } from 'node:crypto';
+import { changedLineCoverage } from './coverage';
+import { verifyRegression } from './verification';
 export class Service {
   readonly store: Store;
   constructor(store: Store) { this.store = store; }
@@ -69,7 +72,7 @@ export class Service {
       await this.owned(earth);
       const revision = await resolveCommit(earth.path,'HEAD'), hash = await workingHash(earth.path);
       for (const run of earth.runs) result[run.id] = !run.changesHash.startsWith('files-v1:') ? 'UNKNOWN' :
-        run.changedDuringRun || run.revision !== revision || run.changesHash !== hash ? 'STALE' : 'CURRENT';
+        run.epoch!==earth.evidenceEpoch || run.changedDuringRun || run.revision !== revision || run.changesHash !== hash ? 'STALE' : 'CURRENT';
     } catch { for (const run of earth.runs) result[run.id] = 'UNKNOWN'; }
     return result;
   }
@@ -83,6 +86,19 @@ export class Service {
       const untracked=await git(earth.path,['ls-files','--others','--exclude-standard','-z']);
       row.changedFiles=new Set((tracked+untracked).split('\0').filter(Boolean)).size;
     } catch { row.changedFiles=null; }
+    for(const row of report.earths){
+      if(row.latestRun?.coverage)try{row.changedCoverage=await changedLineCoverage(row.path,experiment.baselineCommit,row.latestRun.coverage,row.freshness==='CURRENT'&&!row.latestRun.changedDuringRun&&row.repeat.complete&&row.repeat.consistent&&(!row.latestSetup||row.latestSetup.ended<=row.latestRun.started));}
+      catch(error){row.changedCoverage={state:'UNAVAILABLE',covered:0,uncovered:0,unmeasured:0,percentage:null,files:[],reason:String(error)};}
+      if(experiment.regression&&!row.baseline){
+        const baseline=experiment.earths.find(e=>e.baseline),same=new Set<string>();
+        if(baseline)for(const file of new Set(row.tests.filter(t=>experiment.regression!.testIds.includes(t.id)).map(t=>t.file)))try{
+          const a=path.resolve(baseline.path,file),b=path.resolve(row.path,file);if(!contained(baseline.path,a)||!contained(row.path,b))continue;await noSymlinks(a);await noSymlinks(b);
+          const hash=(content:Buffer)=>createHash('sha256').update(content).digest('hex');if(hash(await readFile(a))===hash(await readFile(b)))same.add(file);
+        }catch{/* Missing sources remain inconclusive. */}
+        const commandMatches=JSON.stringify(row.latestRun?.command.args)===JSON.stringify(experiment.regression.command.args)&&row.latestRun?.command.program===experiment.regression.command.program;
+        row.regression=verifyRegression({...row,comparable:row.comparable&&commandMatches},experiment.regression.testIds,same,experiment.regression.minimumRuns??1);
+      }
+    }
     return report;
   }
   async saveCriterion(experimentId:string,criterion:Criterion):Promise<void> {
@@ -109,6 +125,7 @@ export class Service {
   async remove(earth: Earth, confirmed: boolean): Promise<void> {
     if (!confirmed) throw new Error('Explicit deletion confirmation required');
     const exp = await this.owned(earth);
+    if(exp.earths.find(e=>e.id===earth.id)?.checkpoints?.length)throw Error('Preserve or delete checkpoints before removing this Earth');
     if (earth.baseline) throw new Error('Baseline deletion is disabled');
     if ((await git(earth.path,['status','--porcelain','--untracked-files=all','--ignored'])).trim()) throw new Error('Earth has changed, untracked or ignored files. Preserve or remove them manually before deletion.');
     if ((await git(earth.path,['rev-parse','HEAD'])).trim() !== earth.sourceCommit) throw new Error('Earth has commits. Preserve them manually before deletion.');

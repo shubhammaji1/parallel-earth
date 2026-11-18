@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { EnvironmentSnapshot, validateEnvironment } from './environment';
+import { CoverageReport, validateCoverage } from './coverage';
 
 export type State = 'PASSED' | 'FAILED' | 'INCONCLUSIVE' | 'NOT_RUN' | 'ERROR' | 'CANCELLED';
 export interface Command { program: 'node' | 'npm'; args: string[]; label: string }
@@ -17,12 +18,19 @@ export interface Run {
   changedDuringRun?: boolean;
   testReport?: TestReport;
   environment?: EnvironmentSnapshot;
+  coverage?: CoverageReport;
+  epoch?:string;
 }
+export interface Checkpoint { id:string; label:string; created:string; commit:string; tree:string; indexTree:string; head:string }
+export interface RegressionGoal { command:Command; testIds:string[];minimumRuns?:number }
 export interface Earth {
   id: string; experimentId: string; name: string; sourceCommit: string; path: string;
   created: string; archived: boolean; baseline: boolean; runs: Run[];
+  checkpoints?:Checkpoint[];
+  evidenceEpoch?:string;
+  selection?:{sourceEarthId:string;files:string[]};
 }
-export interface Experiment { id: string; name: string; repository: string; baselineCommit: string; created: string; earths: Earth[]; criteria?: Criterion[] }
+export interface Experiment { id: string; name: string; repository: string; baselineCommit: string; created: string; earths: Earth[]; criteria?: Criterion[]; regression?:RegressionGoal }
 export interface Catalog { version: 1; experiments: Experiment[] }
 export const uuid = randomUUID;
 export function name(value: string): string {
@@ -78,6 +86,7 @@ export function validateCatalog(value: unknown): Catalog {
   for (const exp of value.experiments) {
     object(exp); id(exp.id); text(exp.name, 100); name(exp.name); text(exp.repository); commit(exp.baselineCommit); date(exp.created);
     if (seen.has(exp.id)) throw new Error('Duplicate ID'); seen.add(exp.id);
+    if(exp.regression!==undefined){object(exp.regression);validateCriterion({id:exp.id,label:'Regression goal',command:exp.regression.command as Command,testIds:exp.regression.testIds as string[]});if(!(exp.regression.testIds as string[]).length)throw Error('Select regression tests');if(exp.regression.minimumRuns!==undefined&&(!Number.isInteger(exp.regression.minimumRuns)||Number(exp.regression.minimumRuns)<1||Number(exp.regression.minimumRuns)>10))throw Error('Invalid regression repeat requirement');}
     if (exp.criteria!==undefined) {
       if (!Array.isArray(exp.criteria)||exp.criteria.length>100) throw new Error('Invalid criteria collection');
       const ids=new Set<string>();
@@ -88,6 +97,12 @@ export function validateCatalog(value: unknown): Catalog {
       object(earth); id(earth.id); id(earth.experimentId); text(earth.name, 100); name(earth.name); text(earth.path); commit(earth.sourceCommit); date(earth.created);
       if (seen.has(earth.id) || earth.experimentId !== exp.id || earth.sourceCommit !== exp.baselineCommit || typeof earth.archived !== 'boolean' || typeof earth.baseline !== 'boolean') throw new Error('Invalid Earth relationship');
       seen.add(earth.id);
+      if(earth.evidenceEpoch!==undefined)id(earth.evidenceEpoch);
+      if(earth.checkpoints!==undefined){
+        if(!Array.isArray(earth.checkpoints)||earth.checkpoints.length>20)throw Error('Invalid checkpoints');
+        const ids=new Set<string>();for(const cp of earth.checkpoints){object(cp);id(cp.id);name(cp.label as string);date(cp.created);for(const field of ['commit','tree','indexTree','head'])commit(cp[field]);if(ids.has(cp.id))throw Error('Duplicate checkpoint');ids.add(cp.id);}
+      }
+      if(earth.selection!==undefined){object(earth.selection);id(earth.selection.sourceEarthId);if(!Array.isArray(earth.selection.files)||!earth.selection.files.length||earth.selection.files.length>1000||earth.selection.files.some(f=>typeof f!=='string'||f.length>1000||/[\0\r\n]/.test(f)))throw Error('Invalid export selection');}
       if (!Array.isArray(earth.runs) || earth.runs.length > 50) throw new Error('Invalid run collection');
       for (const run of earth.runs) {
         object(run); id(run.id); id(run.earthId); date(run.started); date(run.ended); text(run.output, 1100000); text(run.fingerprint); text(run.changesHash); commit(run.revision); text(run.limitation);
@@ -96,6 +111,8 @@ export function validateCatalog(value: unknown): Catalog {
         if (run.changedDuringRun !== undefined && typeof run.changedDuringRun !== 'boolean') throw new Error('Invalid evidence change flag');
         if (run.testReport!==undefined) validateTestReport(run.testReport);
         if (run.environment!==undefined) validateEnvironment(run.environment);
+        if (run.coverage!==undefined) validateCoverage(run.coverage);
+        if(run.epoch!==undefined)id(run.epoch);
         if (run.batchId !== undefined) id(run.batchId);
         if (run.repeatTotal !== undefined && (!Number.isInteger(run.repeatTotal) || Number(run.repeatTotal) < 1 || Number(run.repeatTotal) > 10)) throw new Error('Invalid repeat count');
         if (run.repeatIndex !== undefined && (!Number.isInteger(run.repeatIndex) || Number(run.repeatIndex) < 1 || Number(run.repeatIndex) > Number(run.repeatTotal))) throw new Error('Invalid repeat index');

@@ -1,3 +1,14 @@
+# 0.6.0
+
+- Combined experiment lifecycle, safe integration and stronger verification in one release.
+- Added durable checkpoints, staged/unstaged restoration, safety backups and explicit evidence invalidation.
+- Added a visual recipe builder and approved execution, plus preview health/status monitoring with a configurable local endpoint.
+- Added whole-file selective export through a fresh verification Earth and passing-check gate, plus baseline refresh with preserved conflict files.
+- Added a visual storage/recovery manager for disk usage, retained evidence, worktree records and interrupted queues.
+- Added guided regression verification with identical-test-file checks and repeat requirements, including optional goals in CI recipes.
+- Added native Test Explorer results/reruns and captured Istanbul changed-line coverage in dashboards and reports.
+- Added official Marketplace packaging through npm run package:marketplace. Reports use version 6; catalogs remain compatible.
+
 # 0.5.0
 
 - Fixed structured-report capture and CI gates when the OS temporary root uses a symlink (including macOS /var); report-file symlinks remain refused.

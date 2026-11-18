@@ -248,6 +248,18 @@ An interrupted host may leave `execution-queue/active` beneath your storage root
 - **Stale evidence:** the explorer refreshes freshness while visible (approximately every 15 seconds), and comparison/export rechecks file contents and HEAD. Changed code or baseline evidence is labelled STALE and is not comparable. Legacy records show UNKNOWN until rerun. A command that changes files also invalidates its evidence. Raw command outcomes remain available in reports.
 
 Freshness hashes include tracked and non-ignored untracked files. Ignored files, installed dependencies and external service state are outside this check. Hashes do not prove that files stayed unchanged at every instant during a command. Symlinks and submodules are refused by snapshot/freshness inspection. Git clean/checkout filters may run during snapshot/copy operations in a trusted repository. Review new files for secrets before branch creation. A branch snapshot contains the working file state, not an independent copy of staged-only content. Snapshot objects can remain in Git even if branch creation is cancelled; normal Git maintenance manages unreachable objects.
+## New in 0.6.0: the combined release
+
+The planned 0.6, 0.7 and 0.8 improvements are combined in this release:
+
+- **Experiment lifecycle:** durable checkpoints with safety backups, a visual recipe builder and managed preview health.
+- **Safe integration:** choose files for a fresh verification Earth, refresh baselines into new experiments, and inspect disk usage/recovery through a visual manager.
+- **Stronger verification:** guided regression comparisons with identical selected test files, native VS Code Test Explorer results and changed-line Istanbul coverage.
+
+Checkpoint restoration invalidates previous checks. Selective exports require fresh passing checks on the selected files. Regression verification records what selected tests demonstrate; coverage records which measured statement lines ran. Neither proves complete correctness.
+
+See the [combined 0.6.0 guide](docs/combined-release-0.6.md) for commands, setup, recovery, CI regression recipes and coverage integration. Generate the uploadable VSIX with `npm run package:marketplace`.
+
 ## New in 0.5.0
 
 - **App previews:** right-click an Earth to start, open or stop its app in a managed terminal. Each preview gets a separate local port; choose PORT/HOST mode or Vite strict-port mode. Configure separate test databases/services when needed.

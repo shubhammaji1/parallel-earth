@@ -7,7 +7,8 @@ import { Command, Run, RunKind, validateCommand } from './domain';
 import { git, workingHash, readPackage, noSymlinks } from './git';
 import { parseTestReport } from './test-results';
 import { captureEnvironment, environmentKey, EnvironmentSnapshot } from './environment';
-export interface RunOptions { approved: boolean; trusted: boolean; timeoutMs: number; maxBytes: number; signal?: AbortSignal; onOutput?: (text: string) => void; kind?: RunKind; batchId?: string; repeatIndex?: number; repeatTotal?: number; queueScope?: string; concurrencyLimit?: number; queuedMs?: number }
+import { parseCoverage, CoverageReport } from './coverage';
+export interface RunOptions { epoch?:string; approved: boolean; trusted: boolean; timeoutMs: number; maxBytes: number; signal?: AbortSignal; onOutput?: (text: string) => void; kind?: RunKind; batchId?: string; repeatIndex?: number; repeatTotal?: number; queueScope?: string; concurrencyLimit?: number; queuedMs?: number }
 export async function discoverCommands(target: string): Promise<Command[]> {
   return Object.keys(await readPackage(target)).filter(s => /^(test|build|lint|typecheck|check)(:|$)/.test(s) && /^[a-zA-Z0-9:_-]+$/.test(s)).map(label => ({program:'npm',args:['run',label],label}));
 }
@@ -33,14 +34,17 @@ export class Runner {
     try {
       const revision = (await git(target,['rev-parse','HEAD'])).trim();
       const changesHash = await workingHash(target);
+      if((await git(target,['ls-files','--unmerged','-z'])).length)throw Error('Resolve merge conflicts before running checks.');
       const environment=await captureEnvironment(target);
       const envFingerprint = await fingerprint(target,options.timeoutMs,environment); const start = Date.now();
       // macOS temp roots may contain OS-managed symlinks (/var -> /private/var).
       // Resolve the root before creating our private directory; report-file links remain forbidden.
       if(options.kind!=='setup')captureDirectory=await mkdtemp(path.join(await realpath(os.tmpdir()),'parallel-earth-report-'));
       const reportFile=captureDirectory?path.join(captureDirectory,'results.json'):undefined;
+      const coverageFile=captureDirectory?path.join(captureDirectory,'coverage.json'):undefined;
       if(reportFile)await writeFile(reportFile,'',{flag:'wx'});
-      if (options.signal?.aborted) return {id:randomUUID(),earthId,command,started:new Date(start).toISOString(),ended:new Date().toISOString(),state:'CANCELLED',exitCode:null,output:'',truncated:false,durationMs:Date.now()-start,fingerprint:envFingerprint,revision,changesHash,environment,kind:options.kind??'check',batchId:options.batchId,repeatIndex:options.repeatIndex,repeatTotal:options.repeatTotal,queueScope:options.queueScope,concurrencyLimit:options.concurrencyLimit,queuedMs:options.queuedMs,limitation:'Cancelled during preparation; command was not launched.'};
+      if(coverageFile)await writeFile(coverageFile,'',{flag:'wx'});
+      if (options.signal?.aborted) return {id:randomUUID(),earthId,command,started:new Date(start).toISOString(),ended:new Date().toISOString(),state:'CANCELLED',exitCode:null,output:'',truncated:false,durationMs:Date.now()-start,fingerprint:envFingerprint,revision,changesHash,environment,epoch:options.epoch,kind:options.kind??'check',batchId:options.batchId,repeatIndex:options.repeatIndex,repeatTotal:options.repeatTotal,queueScope:options.queueScope,concurrencyLimit:options.concurrencyLimit,queuedMs:options.queuedMs,limitation:'Cancelled during preparation; command was not launched.'};
       return await new Promise<Run>((resolve) => {
         let output = Buffer.alloc(0), stdout = Buffer.alloc(0), stdoutTruncated = false, truncated = false, timedOut = false, cancelled = false, spawnError = '';
         const env: NodeJS.ProcessEnv = {};
@@ -49,6 +53,7 @@ export class Runner {
         // npm preambles would otherwise corrupt a script's JSON stdout report.
         env.npm_config_loglevel = 'silent';
         if(reportFile)env.PARALLEL_EARTH_REPORT=reportFile;
+        if(coverageFile)env.PARALLEL_EARTH_COVERAGE=coverageFile;
         // npm.cmd requires cmd.exe on Windows. Only a constrained script identifier reaches it.
         const isWin = process.platform === 'win32' && command.program === 'npm';
         const program = isWin ? (process.env.COMSPEC ?? 'cmd.exe') : command.program;
@@ -90,13 +95,19 @@ export class Runner {
             } finally { await handle.close(); }
           } catch { testReport={format:'jest-compatible-json',complete:false,tests:[],issue:'Run report file could not be read safely.'}; }
           if(testReport && (timedOut||cancelled||spawnError)) { testReport.complete=false;testReport.issue='Execution did not complete normally.'; }
+          let coverage:CoverageReport|undefined;
+          if(coverageFile)try{
+            await noSymlinks(coverageFile);const handle=await open(coverageFile,'r');
+            try{const bytes=Buffer.alloc(options.maxBytes+1),result=await handle.read(bytes,0,bytes.length,0);coverage=parseCoverage(bytes.subarray(0,result.bytesRead).toString('utf8'),target,result.bytesRead>options.maxBytes);}finally{await handle.close();}
+          }catch{coverage={format:'istanbul-json',complete:false,files:[],issue:'Coverage file could not be read safely.'};}
+          if(coverage&&(timedOut||cancelled||spawnError)){coverage.complete=false;coverage.issue='Execution did not complete normally.';}
           const state = cancelled ? 'CANCELLED' : timedOut || spawnError ? 'ERROR' : code === 0 ? 'PASSED' : code === null ? 'ERROR' : 'FAILED';
-          resolve({id:randomUUID(),earthId,command,started:new Date(start).toISOString(),ended:new Date().toISOString(),state,exitCode:code,output:output.toString('utf8'),truncated,durationMs:Date.now()-start,changedDuringRun,testReport,environment,kind:options.kind??'check',batchId:options.batchId,repeatIndex:options.repeatIndex,repeatTotal:options.repeatTotal,queueScope:options.queueScope,concurrencyLimit:options.concurrencyLimit,queuedMs:options.queuedMs,fingerprint:envFingerprint,revision,changesHash,limitation:timedOut ? 'Timeout exceeded' : spawnError || 'Exit status and framework-reported JSON assertions are recorded separately. Test semantics and coverage are not inferred. Installed dependencies, tools and external services may differ. Changes hash includes tracked and non-ignored untracked file contents; ignored files and external services are excluded. Elapsed time is not a benchmark; external processes and test workers can contend for resources.'});
+          resolve({id:randomUUID(),earthId,command,started:new Date(start).toISOString(),ended:new Date().toISOString(),state,exitCode:code,output:output.toString('utf8'),truncated,durationMs:Date.now()-start,changedDuringRun,testReport,environment,coverage,epoch:options.epoch,kind:options.kind??'check',batchId:options.batchId,repeatIndex:options.repeatIndex,repeatTotal:options.repeatTotal,queueScope:options.queueScope,concurrencyLimit:options.concurrencyLimit,queuedMs:options.queuedMs,fingerprint:envFingerprint,revision,changesHash,limitation:timedOut ? 'Timeout exceeded' : spawnError || 'Exit status and framework-reported JSON assertions are recorded separately. Test semantics and coverage are not inferred. Installed dependencies, tools and external services may differ. Changes hash includes tracked and non-ignored untracked file contents; ignored files and external services are excluded. Elapsed time is not a benchmark; external processes and test workers can contend for resources.'});
         });
       });
     } finally {
       this.active--;
-      if(captureDirectory){await unlink(path.join(captureDirectory,'results.json')).catch(()=>{});await rmdir(captureDirectory).catch(()=>{});}
+      if(captureDirectory){await unlink(path.join(captureDirectory,'results.json')).catch(()=>{});await unlink(path.join(captureDirectory,'coverage.json')).catch(()=>{});await rmdir(captureDirectory).catch(()=>{});}
     }
   }
 }

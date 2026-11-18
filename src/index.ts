@@ -17,3 +17,6 @@ export * from './test-results';
 export * from './comparison-view';
 export * from './environment';
 export * from './preview';
+export * from './lifecycle';
+export * from './coverage';
+export * from './verification';

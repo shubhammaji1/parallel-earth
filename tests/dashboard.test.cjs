@@ -4,11 +4,11 @@ const file=path.resolve('dist/extension.js'),realRequire=createRequire(file);
 const disposable=()=>({dispose(){}});
 function host(visible=false,trusted=false,previewFixture=false){
  const views=[],panels=[],commands=new Map(),output=[],providers=new Map(),executed=[];
- const terminals=[],terminalClosed=[],quickPicks=[],opened=[];
+ const terminals=[],terminalClosed=[],shellEnded=[],quickPicks=[],opened=[];
  const catalog={version:1,experiments:[]},freshnessOverrides=new Map();
  const base=realRequire('./index');
  const core={...base,Store:class{constructor(root){this.root=root;}async load(){return catalog;}},
-  Service:class extends base.Service{async owned(earth){if(previewFixture)return catalog.experiments.find(e=>e.id===earth.experimentId);return super.owned(earth);}async freshness(earth){return freshnessOverrides.has(earth.id)?Object.fromEntries(earth.runs.map(r=>[r.id,freshnessOverrides.get(earth.id)])):super.freshness(earth);}}};
+  LifecycleService:class extends base.LifecycleService{async owned(earth){if(previewFixture)return catalog.experiments.find(e=>e.id===earth.experimentId);return super.owned(earth);}async freshness(earth){return freshnessOverrides.has(earth.id)?Object.fromEntries(earth.runs.map(r=>[r.id,freshnessOverrides.get(earth.id)])):super.freshness(earth);}}};
  const uri=fsPath=>({fsPath});
  const vscode={
   TreeItem:class{constructor(label,collapsibleState){this.label=label;this.collapsibleState=collapsibleState;}},TreeItemCollapsibleState:{None:0,Collapsed:1,Expanded:2},ThemeIcon:class{constructor(id,color){this.id=id;this.color=color;}},ThemeColor:class{constructor(id){this.id=id;}},
@@ -19,6 +19,7 @@ function host(visible=false,trusted=false,previewFixture=false){
   workspace:{isTrusted:trusted,getConfiguration:()=>({get:(_key,fallback)=>fallback}),onDidGrantWorkspaceTrust:disposable,onDidChangeConfiguration:disposable},
   commands:{registerCommand:(name,handler)=>{commands.set(name,handler);return disposable();},executeCommand:async name=>{executed.push(name);return commands.get(name)?.();}},
   window:{
+   onDidEndTerminalShellExecution:fn=>{shellEnded.push(fn);return disposable();},
    onDidCloseTerminal:fn=>{terminalClosed.push(fn);return disposable();},
    createTerminal:options=>{const terminal={options,show(){},dispose(){terminal.disposed=true;for(const fn of terminalClosed)fn(terminal);}};terminals.push(terminal);return terminal;},
    showQuickPick:async choices=>{const index=quickPicks.shift()??0;return choices[index];},
@@ -43,9 +44,9 @@ function host(visible=false,trusted=false,previewFixture=false){
   }
  };
  const module={exports:{}};
- vm.runInNewContext(fs.readFileSync(file,'utf8'),{require:id=>id==='vscode'?vscode:id==='./index'?core:realRequire(id),exports:module.exports,module,console});
+ vm.runInNewContext(fs.readFileSync(file,'utf8'),{require:id=>id==='vscode'?vscode:id==='./index'?core:realRequire(id),exports:module.exports,module,console,URL});
  const context={subscriptions:[],extensionMode:vscode.ExtensionMode.Production,globalStorageUri:uri(path.resolve('artifacts/dashboard-test-storage')),extensionUri:uri(process.cwd()),extension:{packageJSON:{version:'0.1.1'}}};
- return {...module.exports,context,views,panels,commands,output,providers,catalog,executed,freshnessOverrides,terminals,quickPicks,opened};
+ return {...module.exports,context,views,panels,commands,output,providers,catalog,executed,freshnessOverrides,terminals,quickPicks,opened,shellEnded};
 }
 const settle=()=>new Promise(resolve=>setImmediate(resolve));
 
@@ -61,6 +62,7 @@ test('preview commands launch separate terminal ports, open only their URLs and 
   assert.equal(h.terminals.length,2);assert.notEqual(h.terminals[0].options.env.PORT,h.terminals[1].options.env.PORT);
   assert.equal(h.terminals[0].options.env.HOST,'127.0.0.1');assert.equal(h.terminals[0].options.isTransient,true);
   await h.commands.get('parallelEarth.openPreview')({experimentId:id,earthId:earths[0].id});assert.equal(h.opened[0],'http://127.0.0.1:'+h.terminals[0].options.env.PORT);
+  h.shellEnded[0]({terminal:h.terminals[0],exitCode:1,execution:{}});const rows=await h.views[0].provider.getChildren({experimentId:id});assert.match(rows.find(row=>row.earthId===earths[0].id).description,/Preview FAILED/);
   await h.commands.get('parallelEarth.stopPreview')({experimentId:id,earthId:earths[0].id});assert.equal(h.terminals[0].disposed,true);
   h.terminals[1].dispose();await assert.rejects(h.commands.get('parallelEarth.openPreview')({experimentId:id,earthId:earths[1].id}),/Start a preview/);
  }finally{

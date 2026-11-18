@@ -1,4 +1,6 @@
 import { sidebarMarkup, parseSidebarMessage } from './sidebar';
+import { advancedHandlers } from './advanced-ui';
+import { LifecycleService, PreviewHealth, PreviewStatus, probePreview } from './index';
 import { reservePreviewPort, previewLaunch, captureEnvironment, environmentDifferences } from './index';
 import * as vscode from 'vscode';
 import path from 'node:path';
@@ -18,17 +20,20 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
   const change = new vscode.EventEmitter<Item | undefined>();
   const cfg = () => vscode.workspace.getConfiguration('parallelEarth');
   const root = cfg().get<string>('storageRoot') || context.globalStorageUri.fsPath;
-  const service = new Service(new Store(root));
+  const service = new LifecycleService(new Store(root));
   const runner = new Runner(1);
   const queue = new ExecutionQueue(root);
   const queueStates = new Map<string, QueueState>();
   const controllers = new Set<AbortController>();
   const running = new Set<string>();
   const deleting = new Set<string>();
-  const previews=new Map<string,{terminal:vscode.Terminal;url:string;port:number;earth:Earth}>();
+  let afterChecks:(ids:string[])=>Promise<void>=async()=>{};
+  const previews=new Map<string,{terminal:vscode.Terminal;url:string;port:number;earth:Earth;health:PreviewHealth}>();
+  const previewStates=new Map<string,PreviewStatus>();
   const startingPreviews=new Set<string>();
   context.subscriptions.push({dispose:()=>{for(const preview of previews.values())preview.terminal.dispose();previews.clear();}},
-    vscode.window.onDidCloseTerminal(terminal=>{for(const [id,preview]of previews)if(preview.terminal===terminal){previews.delete(id);change.fire(undefined);}}));
+    vscode.window.onDidCloseTerminal(terminal=>{for(const [id,preview]of previews)if(preview.terminal===terminal){preview.health.stop();previews.delete(id);change.fire(undefined);}}));
+  if(vscode.window.onDidEndTerminalShellExecution)context.subscriptions.push(vscode.window.onDidEndTerminalShellExecution(event=>{for(const preview of previews.values())if(preview.terminal===event.terminal)preview.health.stop('Preview command exited with code '+(event.exitCode??'unknown'),event.exitCode!==0);}));
   let activeExperimentId:string|undefined;
   let homePanel:vscode.WebviewPanel|undefined;
   const comparisonPanels=new Map<string,{panel:vscode.WebviewPanel;selectedId?:string;version:number}>();
@@ -102,6 +107,8 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         trusted();const message=parseComparisonMessage(value);if(!message)return;
         if(message.action==='refresh'){await renderComparison(exp.id);return;}
         if(message.action==='criteria'){await vscode.commands.executeCommand('parallelEarth.manageCriteria',{experimentId:exp.id});return;}
+        const advanced:Record<string,string>={recipe:'recipeBuilder',regression:'guidedRegression',native:'publishTests',storage:'storageManager'};
+        if(advanced[message.action]){await vscode.commands.executeCommand('parallelEarth.'+advanced[message.action],{experimentId:exp.id});return;}
         if('earthId' in message){
           const current=(await service.store.load()).experiments.find(e=>e.id===exp.id);
           if(!current?.earths.some(e=>e.id===message.earthId))return;
@@ -196,6 +203,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
             const states:Record<string,string>={STALE:'Code changed - rerun checks',PASSED:'Checks passed',FAILED:'Checks failed',ERROR:'Check error',CANCELLED:'Cancelled',NOT_RUN:'Not checked',UNSTABLE:'Unstable checks',INCONCLUSIVE:'Incomplete evidence'};
             item.description=(earth.archived?'Archived | ':earth.baseline?'Baseline | ':'')+(queueStates.get(earth.id)==='QUEUED'?'Queued':queueStates.get(earth.id)==='RUNNING'?'Running':queueStates.get(earth.id)==='CANCELLED'?'Cancelled':freshness==='UNKNOWN'?'Freshness unknown - rerun checks':states[state]??state);
             item.contextValue=earth.baseline?'parallelEarth.baseline':'parallelEarth.earth';
+            const preview=previewStates.get(earth.id);if(preview)item.description+=' | Preview '+preview.state;
             item.command={command:'parallelEarth.openEarth',title:'Open Earth',arguments:[item]};
             item.tooltip='Setup: '+(earth.runs.findLast(r=>r.kind==='setup')?.state??'Not recorded')+'\nEarth working directory: '+earth.path+'\n'+(earth.baseline?'Committed baseline':'Alternative Earth')+'\nFresh Earths do not install dependencies. Right-click for Copy Path, Reveal Folder and Set Up Earth.';
             const icon=state==='STALE'?'warning':earth.baseline?'git-commit':state==='PASSED'?'pass':state==='FAILED'?'error':state==='ERROR'?'warning':'globe';
@@ -321,7 +329,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
           if(!current||current.archived)throw new Error('Earth removed or archived while queued.');
           if(await fingerprint(selected.path,timeoutMs)!==approvals.get(selected.id))throw new Error('Manifest, lockfile or environment changed after approval. Review and approve again.');
           if(kind==='check'&&selected.baseline&&((await git(selected.path,['status','--porcelain'])).trim()||(await git(selected.path,['rev-parse','HEAD'])).trim()!==selected.sourceCommit))throw new Error('Baseline has changes; preserve them manually or create a new experiment.');
-          const result=await runner.run(selected.id,selected.path,command,{approved:true,trusted:true,timeoutMs,maxBytes,signal:controller.signal,onOutput:value=>output.append(value),kind,batchId,repeatIndex:index,repeatTotal:count,queueScope:root,concurrencyLimit:1,queuedMs:Date.now()-queuedAt});
+          const result=await runner.run(selected.id,selected.path,command,{approved:true,trusted:true,timeoutMs,maxBytes,epoch:current.evidenceEpoch,signal:controller.signal,onOutput:value=>output.append(value),kind,batchId,repeatIndex:index,repeatTotal:count,queueScope:root,concurrencyLimit:1,queuedMs:Date.now()-queuedAt});
           // Preserve completed evidence even if another catalog writer holds its lock.
           const recovery=path.join(root,'run-recovery');await mkdir(recovery,{recursive:true});
           const evidenceFile=path.join(recovery,result.id+'.json');await writeFile(evidenceFile,JSON.stringify(result));
@@ -335,7 +343,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       finally{cancel.dispose();}
     });
       await vscode.window.showInformationMessage(stopped?'Stopped. Partial repeat series are inconclusive; completed runs are retained.':kind==='setup'?'Setup finished. Review its recorded status before running checks.':'Checks recorded. Compare evidence; elapsed times are not benchmarks.');
-    }finally{controllers.delete(controller);for(const e of earths){running.delete(e.id);if(controller.signal.aborted)queueStates.set(e.id,'CANCELLED');else queueStates.delete(e.id);}refresh();}
+    }finally{controllers.delete(controller);for(const e of earths){running.delete(e.id);if(controller.signal.aborted)queueStates.set(e.id,'CANCELLED');else queueStates.delete(e.id);}refresh();await afterChecks([...new Set(earths.map(e=>e.experimentId))]);}
   }
   const handlers: Record<string,(item?: Item)=>Promise<unknown>> = {
     async showHome() {await showHome();},
@@ -498,11 +506,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         let released=false;
         try {
           const launch=previewLaunch(script,lease.port,mode.value);
+          const healthPath=cfg().get<string>('previewHealthPath','/');if(!healthPath.startsWith('/')||healthPath.startsWith('//')||healthPath.includes('\\')||healthPath.length>200||/[\x00-\x20]/.test(healthPath))throw Error('Preview health path must be a local path such as / or /health');
           await lease.release();released=true;
           const terminal=vscode.window.createTerminal({name:'Earth: '+selected.name+' ('+lease.port+')',cwd:selected.path,...launch,isTransient:true});
-          previews.set(selected.id,{terminal,url:lease.url,port:lease.port,earth:selected});context.subscriptions.push(terminal);
+          const health:PreviewHealth=new PreviewHealth(new URL(healthPath,lease.url).toString(),status=>{previewStates.set(selected.id,status);change.fire(undefined);},async url=>{if(terminal.exitStatus){health.stop('Terminal exited with code '+(terminal.exitStatus.code??'unknown'),terminal.exitStatus.code!==0);return {ready:false,detail:'Terminal exited'};}return probePreview(url);});
+          previews.set(selected.id,{terminal,url:lease.url,port:lease.port,earth:selected,health});context.subscriptions.push(terminal,health);previewStates.set(selected.id,health.status);health.start();
           terminal.show();
-          await vscode.window.showInformationMessage('Preview launched at '+lease.url+'. Check the terminal for readiness or port errors. Use Open App Preview when ready.');
+          await vscode.window.showInformationMessage('Preview starting at '+lease.url+'. The Earth row shows HTTP health. Use Preview Health for details.');
         }finally{if(!released)await lease.release();}
       }finally{startingPreviews.delete(selected.id);}
     },
@@ -511,6 +521,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
       if(!preview)throw Error('Start a preview for this Earth first.');
       await vscode.env.openExternal(vscode.Uri.parse(preview.url));
     },
+    async previewHealth(item){trusted();const selected=await earth(item);if(!selected)return;const preview=previews.get(selected.id);if(preview)await preview.health.check();await text(JSON.stringify(previewStates.get(selected.id)??{state:'STOPPED',detail:'No managed preview in this window'},null,2),'json');},
     async stopPreview(item) {
       trusted();const selected=await earth(item);if(!selected)return;const preview=previews.get(selected.id);
       if(!preview)return;preview.terminal.dispose();previews.delete(selected.id);
@@ -590,6 +601,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     },
     async refresh() {refresh();}
   };
+  Object.assign(handlers,advancedHandlers({api:vscode,context,service,trusted,earth,experiment,text,refresh,execute:executePlan,
+    onChecksRecorded:listener=>{afterChecks=listener;},
+    busy:selected=>running.has(selected.id)||previews.has(selected.id)||startingPreviews.has(selected.id)||deleting.has(selected.experimentId),
+    activateExperiment:id=>{activeExperimentId=id;refresh();}}));
   function rootExistsFallback():string{return vscode.workspace.workspaceFolders?.find(f=>f.uri.scheme==='file')?.uri.fsPath??context.extensionUri.fsPath;}
   for(const [id,handler]of Object.entries(handlers))context.subscriptions.push(vscode.commands.registerCommand('parallelEarth.'+id,async(arg:unknown)=>{
     try {

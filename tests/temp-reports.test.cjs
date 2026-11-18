@@ -26,7 +26,7 @@ test('runner resolves the OS temp root before creating and checking its private 
   let run=await runner.run(randomUUID(),repo,command,options);assert.equal(run.state,'PASSED',run.output);assert.equal(run.testReport?.complete,true,JSON.stringify(run.testReport));
   await fs.writeFile(path.join(repo,'report.cjs'),'require("node:fs").writeFileSync(process.env.PARALLEL_EARTH_REPORT,'+JSON.stringify(JSON.stringify(payload))+');console.log("noisy stdout");');
   run=await runner.run(randomUUID(),repo,command,options);assert.equal(run.testReport?.complete,true,JSON.stringify(run.testReport));
-  assert.equal(resolved,2);assert.equal(created,2);assert.equal(guarded,2);assert.deepEqual(await fs.readdir(physical),[]);
+  assert.equal(resolved,2);assert.equal(created,2);assert.equal(guarded,4);assert.deepEqual(await fs.readdir(physical),[]);
  }finally{assert.equal(path.dirname(root),parent);assert.ok(path.basename(root).startsWith('temp-report-resolution-'));await fs.rm(root,{recursive:true,force:true,maxRetries:5,retryDelay:100});}
 });
 

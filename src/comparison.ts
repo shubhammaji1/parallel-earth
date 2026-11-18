@@ -1,6 +1,8 @@
 import { Experiment, Run, Earth } from './domain';
 import { compareTests } from './test-results';
 import { environmentDifferences } from './environment';
+import { ChangedCoverage } from './coverage';
+import { RegressionVerification } from './verification';
 const sameCommand = (a: Pick<Run,'command'>, b: Pick<Run,'command'>) => a.command.program === b.command.program && JSON.stringify(a.command.args) === JSON.stringify(b.command.args);
 export function checkSeries(runs: Run[]) {
   const checks = runs.filter(r => r.kind !== 'setup'), latest = checks.at(-1);
@@ -35,7 +37,7 @@ export function evaluateCriteria(experiment: Experiment, earth: Earth, evidence?
 }
 export function compare(experiment: Experiment, evidence?: Record<string,Freshness>) {
   const baseline = experiment.earths.find(e => e.baseline);
-  return {version:5,experimentId:experiment.id,name:experiment.name,repository:experiment.repository,baselineCommit:experiment.baselineCommit,generated:new Date().toISOString(),criteria:experiment.criteria??[],
+  return {version:6,experimentId:experiment.id,name:experiment.name,repository:experiment.repository,baselineCommit:experiment.baselineCommit,generated:new Date().toISOString(),criteria:experiment.criteria??[],
     limitations:['Individual tests are framework-reported Jest-compatible JSON, not independently verified assertions. Acceptance criteria reflect the mapped tests, not proof of requirement semantics.',
       'Worktrees separate code state; commands can access this machine and network. Dependencies are not shared automatically.',
       'Fingerprints cover OS/architecture, extension Node, observed PATH Node/npm versions, timeout, manifest, lockfiles and selected configuration hashes. Raw configuration and arbitrary environment variables are not exported; installed dependency trees, global tool config and external services are not verified.',
@@ -63,6 +65,8 @@ export function compare(experiment: Experiment, evidence?: Record<string,Freshne
         ['PASSED','FAILED','ERROR','CANCELLED'].includes(result.summary) && base.summary === result.summary ? result.summary : 'INCONCLUSIVE';
       return {id:earth.id,name:earth.name,path:earth.path,baseline:earth.baseline,archived:earth.archived,state:freshness==='STALE'?'STALE':result.summary,outcome,comparable,freshness,baselineFreshness,
         changedFiles:null as number|null,tests:compareTests(base.runs,result.runs,comparable&&!!evidence),criteria:evaluateCriteria(experiment,earth,evidence),
+        changedCoverage:null as ChangedCoverage|null,regression:null as RegressionVerification|null,
+        checkpoints:earth.checkpoints??[],selection:earth.selection??null,
         environment:latest?.environment??null,environmentDifferences:environmentDifferences(base.latest?.environment,latest?.environment)??null,
         setupStatus:setup?.state??'NOT_RUN',latestSetup:setup??null,repeat:{expected:result.expected,recorded:result.recorded,complete:result.complete,consistent:result.consistent,unstable:result.unstable},
         latestRun:latest??null,series:result.runs,runs:earth.runs};
@@ -76,6 +80,7 @@ function environmentMarkdown(earth:Report['earths'][number]):string {
 }
 export function markdown(report: Report): string {
   const command = (r: Run) => cell([r.command.program,...r.command.args].join(' '));
+  const verification=(earth:Report['earths'][number])=>'\n\n#### Regression verification\n\n'+(earth.regression?earth.regression.state+': '+cell(earth.regression.reason):'No regression goal configured.')+'\n\n#### Changed-line coverage\n\n'+(earth.changedCoverage?earth.changedCoverage.state+'; covered '+earth.changedCoverage.covered+'; uncovered '+earth.changedCoverage.uncovered+'; unmeasured '+earth.changedCoverage.unmeasured+'; measured coverage '+(earth.changedCoverage.percentage??'N/A')+'\n\n'+cell(earth.changedCoverage.reason):'No recorded coverage.');
   const evidence = (r: Run) => '- '+cell(r.kind??'check')+' '+(r.repeatIndex??1)+'/'+(r.repeatTotal??1)+' — '+command(r)+' — '+r.state+
     '\n  - Run: '+r.id+'; revision: '+r.revision+'; fingerprint: '+cell(r.fingerprint)+'; changes: '+cell(r.changesHash)+
     '\n  - Started: '+r.started+'; ended: '+r.ended+'; elapsed (not benchmark): '+r.durationMs+' ms'+
@@ -88,6 +93,6 @@ export function markdown(report: Report): string {
     '\n\n## Execution evidence\n\n'+report.earths.map(e=>'### '+cell(e.name)+'\n\nDirectory: '+cell(e.path)+'\n\n'+
       (e.latestSetup?'Latest approved setup:\n\n'+evidence(e.latestSetup)+'\n\n':'Setup: no recorded setup run. Dependencies may have been installed manually.\n\n')+
       (e.series.length?e.series.map(evidence).join('\n\n'):'No check execution evidence.')+
-      environmentMarkdown(e)+'\n\n#### Individual tests\n\n'+(e.tests.length?'| File / test | Baseline | Current | Comparison |\n| --- | --- | --- | --- |\n'+e.tests.map(t=>'| '+cell(t.file+' / '+t.name)+' | '+t.baseline+' | '+t.current+' | '+t.outcome+' |').join('\n'):'No structured test evidence. Use a Jest-compatible JSON reporter.')+
+      environmentMarkdown(e)+verification(e)+'\n\n#### Individual tests\n\n'+(e.tests.length?'| File / test | Baseline | Current | Comparison |\n| --- | --- | --- | --- |\n'+e.tests.map(t=>'| '+cell(t.file+' / '+t.name)+' | '+t.baseline+' | '+t.current+' | '+t.outcome+' |').join('\n'):'No structured test evidence. Use a Jest-compatible JSON reporter.')+
       '\n\n#### Acceptance criteria\n\n'+(e.criteria.length?e.criteria.map(c=>'- '+cell(c.label)+': **'+c.state+'** - '+cell(c.reason)).join('\n'):'No acceptance criteria defined.')).join('\n\n')+'\n';
 }

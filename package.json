@@ -2,7 +2,7 @@
   "name": "parallel-earth",
   "displayName": "ParallelEarth",
   "description": "Explore alternate futures. Verify before you change. Local worktree experiments with real check evidence.",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "publisher": "shubhammaji1",
   "license": "MIT",
   "engines": {
@@ -42,7 +42,8 @@
     "demo": "node scripts/demo.cjs",
     "package": "node scripts/package.cjs",
     "vscode:prepublish": "npm run build",
-    "dev:prepare": "node scripts/prepare-dev.cjs"
+    "dev:prepare": "node scripts/prepare-dev.cjs",
+    "package:marketplace": "node scripts/marketplace.cjs"
   },
   "contributes": {
     "commands": [
@@ -202,6 +203,56 @@
         "command": "parallelEarth.compareEnvironment",
         "title": "ParallelEarth: Compare Environments",
         "icon": "$(server-environment)"
+      },
+      {
+        "command": "parallelEarth.createCheckpoint",
+        "title": "ParallelEarth: Save Checkpoint",
+        "icon": "$(save)"
+      },
+      {
+        "command": "parallelEarth.restoreCheckpoint",
+        "title": "ParallelEarth: Restore Checkpoint",
+        "icon": "$(history)"
+      },
+      {
+        "command": "parallelEarth.deleteCheckpoint",
+        "title": "ParallelEarth: Delete Checkpoint",
+        "icon": "$(trash)"
+      },
+      {
+        "command": "parallelEarth.selectiveExport",
+        "title": "ParallelEarth: Export Selected Files",
+        "icon": "$(git-pull-request)"
+      },
+      {
+        "command": "parallelEarth.refreshBaseline",
+        "title": "ParallelEarth: Refresh Baseline",
+        "icon": "$(sync)"
+      },
+      {
+        "command": "parallelEarth.storageManager",
+        "title": "ParallelEarth: Storage and Recovery Manager",
+        "icon": "$(database)"
+      },
+      {
+        "command": "parallelEarth.recipeBuilder",
+        "title": "ParallelEarth: Recipe Builder",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "parallelEarth.guidedRegression",
+        "title": "ParallelEarth: Verify Regression Fix",
+        "icon": "$(beaker)"
+      },
+      {
+        "command": "parallelEarth.publishTests",
+        "title": "ParallelEarth: Publish Results to Test Explorer",
+        "icon": "$(test-view-icon)"
+      },
+      {
+        "command": "parallelEarth.previewHealth",
+        "title": "ParallelEarth: Preview Health",
+        "icon": "$(pulse)"
       }
     ],
     "viewsContainers": {
@@ -378,6 +429,56 @@
           "command": "parallelEarth.compareEnvironment",
           "when": "viewItem == parallelEarth.experiment",
           "group": "preview@compareEnvironment"
+        },
+        {
+          "command": "parallelEarth.createCheckpoint",
+          "when": "viewItem == parallelEarth.earth",
+          "group": "advanced@createCheckpoint"
+        },
+        {
+          "command": "parallelEarth.restoreCheckpoint",
+          "when": "viewItem == parallelEarth.earth",
+          "group": "advanced@restoreCheckpoint"
+        },
+        {
+          "command": "parallelEarth.deleteCheckpoint",
+          "when": "viewItem == parallelEarth.earth",
+          "group": "advanced@deleteCheckpoint"
+        },
+        {
+          "command": "parallelEarth.selectiveExport",
+          "when": "viewItem == parallelEarth.earth",
+          "group": "advanced@selectiveExport"
+        },
+        {
+          "command": "parallelEarth.refreshBaseline",
+          "when": "viewItem == parallelEarth.experiment",
+          "group": "advanced@refreshBaseline"
+        },
+        {
+          "command": "parallelEarth.storageManager",
+          "when": "viewItem == parallelEarth.experiment",
+          "group": "advanced@storageManager"
+        },
+        {
+          "command": "parallelEarth.recipeBuilder",
+          "when": "viewItem == parallelEarth.experiment",
+          "group": "advanced@recipeBuilder"
+        },
+        {
+          "command": "parallelEarth.guidedRegression",
+          "when": "viewItem == parallelEarth.experiment",
+          "group": "advanced@guidedRegression"
+        },
+        {
+          "command": "parallelEarth.publishTests",
+          "when": "viewItem == parallelEarth.experiment",
+          "group": "advanced@publishTests"
+        },
+        {
+          "command": "parallelEarth.previewHealth",
+          "when": "viewItem == parallelEarth.earth || viewItem == parallelEarth.baseline",
+          "group": "advanced@previewHealth"
         }
       ]
     },
@@ -409,6 +510,12 @@
           "default": 262144,
           "minimum": 4096,
           "maximum": 1048576
+        },
+        "parallelEarth.previewHealthPath": {
+          "type": "string",
+          "default": "/",
+          "scope": "resource",
+          "description": "Loopback GET path used to check preview readiness, for example /health. No redirects are followed."
         }
       }
     }

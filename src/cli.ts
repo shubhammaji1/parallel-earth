@@ -11,7 +11,7 @@ import { git, resolveCommit, repositoryRoot } from './git';
 import { markdown, Report } from './comparison';
 import { testIdentity } from './test-results';
 
-const help=`ParallelEarth 0.5 CLI (Node 22.17+)
+const help=`ParallelEarth 0.6 CLI (Node 22.17+)
   node dist/cli.js list --storage PATH
   node dist/cli.js create --storage PATH --repo PATH --name NAME [--baseline REF]
   node dist/cli.js earth --storage PATH --experiment ID --name NAME
@@ -22,14 +22,15 @@ const help=`ParallelEarth 0.5 CLI (Node 22.17+)
 CI creates fresh worktrees, runs baseline and candidate, exports evidence, and exits 0 only for a passing current candidate with comparable baseline evidence and verified configured criteria. Exit 1: failed gate; exit 2: usage/execution error.
 Dependencies are independent. Optional --setup ci|install executes package lifecycle scripts with --approve.
 --approve acknowledges trusted repository commands with filesystem/network privileges. Reports may contain logs; review before sharing.`;
-interface Recipe {version:1;name:string;baseline:string;candidate:string;script:string;repeat?:number;setup?:'ci'|'install';criteria?:{label:string;tests:{file:string;name:string}[]}[]}
+export interface Recipe {version:1;name:string;baseline:string;candidate:string;script:string;repeat?:number;setup?:'ci'|'install';criteria?:{label:string;tests:{file:string;name:string}[]}[];regressionTests?:{file:string;name:string}[]}
 function repeatCount(value:string):number {if(!/^(?:[1-9]|10)$/.test(value))throw Error('Repeat must be 1-10');return Number(value);}
 export function validateRecipe(value:unknown):Recipe {
   if(!value||typeof value!=='object'||Array.isArray(value))throw Error('Invalid recipe');const r=value as Recipe;
-  if(Object.keys(r).some(k=>!['version','name','baseline','candidate','script','repeat','setup','criteria'].includes(k))||r.version!==1)throw Error('Unsupported recipe');
+  if(Object.keys(r).some(k=>!['version','name','baseline','candidate','script','repeat','setup','criteria','regressionTests'].includes(k))||r.version!==1)throw Error('Unsupported recipe');
   name(r.name);for(const ref of [r.baseline,r.candidate])if(typeof ref!=='string'||!ref||ref.startsWith('-')||ref.length>200)throw Error('Invalid recipe ref');
   validateCommand({program:'npm',args:['run',r.script],label:r.script});repeatCount(String(r.repeat??1));
   if(r.setup!==undefined&&!['ci','install'].includes(r.setup))throw Error('Invalid setup');
+  if(r.regressionTests!==undefined)validateRecipe({...r,regressionTests:undefined,criteria:[{label:'Regression tests',tests:r.regressionTests}]});
   if(r.criteria!==undefined){
     if(!Array.isArray(r.criteria)||r.criteria.length>100)throw Error('Invalid recipe criteria');
     for(const c of r.criteria){name(c.label);if(!Array.isArray(c.tests)||!c.tests.length||c.tests.length>100)throw Error('Criteria require 1-100 mapped tests');
@@ -43,9 +44,9 @@ export function ciPasses(report:Report,candidateId:string):boolean {
   if([...c?.series??[],...baseline?.series??[]].some(run=>run.testReport&&!run.testReport.complete))return false;
   return !!c&&c.state==='PASSED'&&c.freshness==='CURRENT'&&c.comparable&&['PASSED','IMPROVEMENT'].includes(c.outcome)&&
     !!c.environment&&c.environment.node!=='UNKNOWN'&&c.environment.npm!=='UNKNOWN'&&!Object.values(c.environment.files).includes('UNREADABLE')&&
-    (!c.latestRun?.testReport||c.latestRun.testReport.complete)&&c.criteria.every(x=>x.state==='VERIFIED')&&c.tests.every(t=>t.current==='PASSED'&&!['REGRESSION','MISSING','SKIPPED','UNSTABLE','INCONCLUSIVE'].includes(t.outcome));
+    (!c.latestRun?.testReport||c.latestRun.testReport.complete)&&(!c.regression||c.regression.state==='VERIFIED')&&c.criteria.every(x=>x.state==='VERIFIED')&&c.tests.every(t=>t.current==='PASSED'&&!['REGRESSION','MISSING','SKIPPED','UNSTABLE','INCONCLUSIVE'].includes(t.outcome));
 }
-export async function cli(argv:string[],io:{out:(s:string)=>void;err:(s:string)=>void}={out:s=>process.stdout.write(s+'\n'),err:s=>process.stderr.write(s+'\n')}):Promise<number> {
+export async function cli(argv:string[],io:{out:(s:string)=>void;err:(s:string)=>void}={out:s=>process.stdout.write(s+'\n'),err:s=>process.stderr.write(s+'\n')},signal?:AbortSignal):Promise<number> {
   if(!argv.length||argv[0]==='--help'||argv[0]==='help'){io.out(help);return 0;}
   const [action,...args]=argv;
   const allowed:Record<string,string[]>={list:[],create:['repo','name','baseline'],earth:['experiment','name'],run:['experiment','earth','script','repeat','approve'],report:['experiment','output','format'],ci:['repo','baseline','candidate','script','repeat','approve','output','format','recipe','setup']};
@@ -72,12 +73,13 @@ export async function cli(argv:string[],io:{out:(s:string)=>void;err:(s:string)=
     if(!flags.has('approve'))throw Error('Command execution requires --approve for a trusted repository.');
     const runner=new Runner(),queue=new ExecutionQueue(storage),controller=new AbortController();
     const cancel=()=>controller.abort();process.once('SIGINT',cancel);process.once('SIGTERM',cancel);
+    signal?.addEventListener('abort',cancel,{once:true});if(signal?.aborted)cancel();
     const execute=async(exp:Experiment,earths:Earth[],command:Command,count:number,setup=false)=>{
       const batchId=randomUUID();
       for(let index=1;index<=count;index++)for(const earth of earths){
         await service.owned(earth);if(earth.archived)throw Error('Earth is archived');
         await queue.execute(earth.id,controller.signal,()=>{},async()=>{
-          const run=await runner.run(earth.id,earth.path,command,{approved:true,trusted:true,timeoutMs:120000,maxBytes:262144,signal:controller.signal,kind:setup?'setup':'check',batchId,repeatIndex:index,repeatTotal:count,queueScope:queue.directory,concurrencyLimit:1});
+          const run=await runner.run(earth.id,earth.path,command,{approved:true,trusted:true,timeoutMs:120000,maxBytes:262144,epoch:earth.evidenceEpoch,signal:controller.signal,kind:setup?'setup':'check',batchId,repeatIndex:index,repeatTotal:count,queueScope:queue.directory,concurrencyLimit:1});
           await service.record(earth,run);if(setup&&run.state!=='PASSED')throw Error('Setup failed for '+earth.name+'; evidence retained in '+exp.id);
         });
       }
@@ -98,12 +100,13 @@ export async function cli(argv:string[],io:{out:(s:string)=>void;err:(s:string)=
       await git(alternative.path,['checkout','--detach',candidate]);
       const command:Command={program:'npm',args:['run',recipe.script],label:recipe.script};
       for(const c of recipe.criteria??[])await service.saveCriterion(exp.id,{id:randomUUID(),label:c.label,command,testIds:[...new Set(c.tests.map(t=>testIdentity(t.file,t.name)))]});
+      if(recipe.regressionTests)await service.store.transaction(async catalog=>{catalog.experiments.find(e=>e.id===exp.id)!.regression={command,testIds:[...new Set(recipe.regressionTests!.map(t=>testIdentity(t.file,t.name)))],minimumRuns:recipe.repeat??1};});
       const earths=[exp.earths[0],alternative];
       if(recipe.setup)try {await execute(exp,earths,{program:'npm',args:[recipe.setup],label:'npm '+recipe.setup},1,true);}
       catch(error){await emit(await service.report(await load(exp.id)));throw error;}
       await execute(exp,earths,command,recipe.repeat??1);
       const report=await service.report(await load(exp.id));await emit(report);return ciPasses(report,alternative.id)?0:1;
-    }finally{process.removeListener('SIGINT',cancel);process.removeListener('SIGTERM',cancel);}
+    }finally{process.removeListener('SIGINT',cancel);process.removeListener('SIGTERM',cancel);signal?.removeEventListener('abort',cancel);}
   }catch(error){io.err('ParallelEarth: '+(error instanceof Error?error.message:String(error)));return 2;}
 }
 if(require.main===module)void cli(process.argv.slice(2)).then(code=>{process.exitCode=code;});
