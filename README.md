@@ -201,11 +201,7 @@ npm run test:host
 npm run package
 ```
 
-For official VSIX packaging, create the output directory if needed and run:
-
-```sh
-npx @vscode/vsce package --no-dependencies --out artifacts/parallel-earth-0.3.0.vsix
-```
+For official VSIX packaging, follow the [publishing guide](docs/publishing.md).
 
 Use the version declared in `package.json` when naming release artifacts. The build transpiles TypeScript; semantic checking is the separate `typecheck` command. Packaging alone does not verify extension behaviour; test a clean installation before releasing an update.
 
@@ -258,7 +254,7 @@ The planned 0.6, 0.7 and 0.8 improvements are combined in this release:
 
 Checkpoint restoration invalidates previous checks. Selective exports require fresh passing checks on the selected files. Regression verification records what selected tests demonstrate; coverage records which measured statement lines ran. Neither proves complete correctness.
 
-See the [combined 0.6.0 guide](docs/combined-release-0.6.md) for commands, setup, recovery, CI regression recipes and coverage integration. Generate the uploadable VSIX with `npm run package:marketplace`.
+See the [combined 0.6.0 guide](docs/combined-release-0.6.md) for commands, setup, recovery, CI regression recipes and coverage integration.
 
 ## New in 0.5.0
 

@@ -15,9 +15,14 @@ Status: local development build. Marketplace publication has not been authorized
 - [ ] Capture screenshots only from the running product.
 - [ ] Configure credentials and obtain explicit publication authorization.
 
-npm run package produces an offline VSIX. It does not imply official Marketplace validation. With development tooling available, also run:
+`npm run package` produces the VSIX used for development and CI. Marketplace packaging uses Microsoft's `@vscode/vsce`, installed separately because its dependency tree includes `picomatch`, which has an unresolved [high-severity advisory](https://github.com/advisories/GHSA-fc5q-39xc-vjpf).
 
-    npx vsce package --no-dependencies --out artifacts/parallel-earth-0.1.0.vsix
+```sh
+npm install --no-save --package-lock=false --ignore-scripts @vscode/vsce
+npm run package:marketplace
+```
+
+The second command writes `artifacts/parallel-earth-<version>-marketplace.vsix`. A subsequent `npm ci --ignore-scripts` restores the locked development dependencies.
 
 Use Install from VSIX in a clean profile, then review the workflow. Publication is a separate authenticated action requiring explicit user authorization. Never embed a PAT.
 

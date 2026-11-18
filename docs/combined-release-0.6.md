@@ -76,7 +76,7 @@ Code changes, checkpoint restore, incomplete checks and later setup prevent old 
 npm run typecheck
 npm test
 npm run demo
-npm run package:marketplace
+npm run package
 ```
 
-Upload `artifacts/parallel-earth-0.6.0-marketplace.vsix`. This command uses Microsoft's installed `@vscode/vsce`. `npm run package` remains the offline writer for local development. Packaging does not publish to an external marketplace.
+Follow the [publishing guide](publishing.md) to generate `artifacts/parallel-earth-0.6.0-marketplace.vsix` with Microsoft's release tool.

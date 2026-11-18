@@ -524,13 +524,7 @@
     "@types/node": "^22.0.0",
     "@types/vscode": "1.100.0",
     "@vscode/test-electron": "^2.5.0",
-    "@vscode/vsce": "^3.0.0",
     "typescript": "^5.9.0"
-  },
-  "overrides": {
-    "@vscode/vsce": {
-      "@azure/identity": "4.13.0"
-    }
   },
   "repository": {
     "type": "git",
